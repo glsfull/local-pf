@@ -32,6 +32,7 @@ button, input, select { font: inherit; }
 .sidebar nav a:hover, .sidebar nav a[aria-current] { color: white; background: #233f64; }
 .nav-icon { display: inline-block; width: 14px; height: 14px; border: 1.5px solid currentColor; }
 .grid-icon { border-radius: 3px; background: linear-gradient(currentColor,currentColor) center / 100% 1px no-repeat; }
+.logs-icon { border-radius: 3px; background: repeating-linear-gradient(currentColor 0 1px, transparent 1px 4px) center / 6px 5px no-repeat; }
 .settings-icon { border-radius: 50%; position: relative; }
 .settings-icon::after { content: ""; position: absolute; inset: 3px; border: 1px solid currentColor; border-radius: 50%; }
 .provider { margin-top: auto; font-size: 13px; }
@@ -83,6 +84,10 @@ tbody td { min-width: 83px; }
 tbody tr:hover { background: #f9fbff; }
 .secondary-line { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; font-size: 12px; }
 .url-cell { font-size: 13px; color: var(--muted); min-width: 150px; }
+.query-cell, .time-cell { min-width: 135px; }
+.status-cell { min-width: 120px; }
+.detail-cell { min-width: 160px; font-size: 13px; }
+.detail-cell > * { display: block; margin-block: 3px; }
 .state, .rank { display: inline-block; color: #506079; background: #edf1f6; padding: 4px 8px; border-radius: 5px; font-size: 12px; font-weight: 650; white-space: nowrap; }
 .state.complete, .rank.top { color: #126240; background: #e0f3e9; }
 .state.running, .rank { color: #1c4f9a; background: #e6efff; }
@@ -119,7 +124,7 @@ input::placeholder { color: #67778c; }
 @media (max-width: 720px) {
   body { display: block; }
   .sidebar { height: auto; min-height: 0; position: static; gap: 16px; padding: 16px; }
-  .sidebar nav { display: flex; }
+  .sidebar nav { display: flex; flex-wrap: wrap; }
   .sidebar .provider { display: none; }
   main { padding: 24px 16px; }
   .page-header { align-items: flex-start; flex-direction: column; }
