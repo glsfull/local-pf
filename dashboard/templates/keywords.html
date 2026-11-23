@@ -1,0 +1,38 @@
+<section class="panel">
+  <header class="panel-header"><h2>Ключевики</h2></header>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Настроенные фразы">
+    <table>
+      <thead><tr>
+        <th>Ключевик</th><th>Позиция</th><th>Шанс топа</th><th>IW</th><th>Спрос</th><th>Мощность</th>
+        <th>Переходы в день</th><th>Конкуренция</th><th>Бюджет в день</th>
+      </tr></thead>
+      <tbody>
+        {% for word in keywords %}
+        {% set sample = latest.get((word.phrase, word.landing_url)) %}
+        <tr>
+          <th scope="row">
+            {{ word.phrase }}
+            {% if word.landing_url %}<small class="secondary-line">{{ word.landing_url }}</small>{% endif %}
+            <small class="secondary-line">{{ 'Бренд · ' ~ word.brand if word.hint_type == 'brand' else 'Домен · ' ~ domain }}</small>
+          </th>
+          <td>
+            {% if not sample %}—{% elif sample.error %}<span class="state failed" title="{{ sample.error }}">Ошибка</span>
+            {% else %}<span class="position {{ sample.rank|rank_tier }}">{{ sample.rank or '51+' }}</span>{% endif %}
+          </td>
+          <td>{{ word.chance|metric('%') }}</td>
+          <td>{{ word.iw|metric }}</td>
+          <td>{{ '+' if word.demand and word.demand > 0 }}{{ word.demand|metric }}</td>
+          <td>{{ word.power|metric('%') }}</td>
+          <td>{{ word.visits|metric }}</td>
+          <td>
+            {% if word.competition %}
+            <span class="competition {{ word.competition }}">{{ competition_labels[word.competition] }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ word.budget|metric(' ₽') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>

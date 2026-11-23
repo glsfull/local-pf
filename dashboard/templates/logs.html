@@ -5,10 +5,13 @@
 {% endmacro %}
 {% block title %}Логи агента{% endblock %}
 {% block content %}
+{% if project_id %}
+<a class="breadcrumb" href="{{ url_for('project', project_id=project_id, run_id=run_id) }}">← К позициям</a>
+{% endif %}
 <header class="page-header">
   <div>
     <h1>Логи агента</h1>
-    {% if report %}<p>{{ report.keyword }} · {{ report.target_domain }} · {{ report.timestamp|display_date }}</p>{% endif %}
+    {% if report %}<p>{{ project_name or report.keyword or report.target_domain }} · {{ report.timestamp|display_date }}</p>{% endif %}
   </div>
 </header>
 {% if error %}
@@ -16,6 +19,7 @@
 {% elif not report %}
 <div class="panel empty"><p>Отчёт появится после завершения проверки агентом.</p></div>
 {% else %}
+{% if report.error %}<p class="notice failure" role="alert">{{ report.error }}</p>{% endif %}
 {% if report.pages_checked %}
 <section class="panel">
   <header class="panel-header"><h2>Проверенные страницы</h2></header>
@@ -38,7 +42,7 @@
 </section>
 {% endif %}
 <section class="panel">
-  <header class="panel-header"><h2>Операции последнего прогона</h2></header>
+  <header class="panel-header"><h2>Операции прогона</h2></header>
   {% if report.events %}
   <div class="table-scroll" tabindex="0" role="region" aria-label="Операции агента">
     <table>
@@ -52,6 +56,8 @@
           <td class="detail-cell">
             {% if event.destination %}<span>{{ event.destination }}</span>{% endif %}
             {% if event.target %}<span>Цель {{ event.target }}</span>{% endif %}
+            {% if event.query %}<span>{{ event.query }} · стр. {{ event.page }}</span>{% endif %}
+            {% if event.result_count is defined %}<span>Найдено результатов {{ event.result_count }}</span>{% endif %}
             {% if event.selector %}<code>{{ event.selector }}</code>{% endif %}
             {% if event.found is defined %}<span>{{ 'Найден' if event.found else 'Не найден' }}</span>{% endif %}
             {% if event.step %}<span>Шаг {{ event.step }}</span>{% endif %}

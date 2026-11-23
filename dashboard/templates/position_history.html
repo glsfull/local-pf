@@ -1,0 +1,85 @@
+{% if days %}
+<section class="panel visibility">
+  <header class="panel-header">
+    <div>
+      <h2>Видимость по датам</h2>
+      <p>Категории позиций среди проверенных фраз, МСК</p>
+    </div>
+    <div class="segmented" aria-label="Тип запроса для графика">
+      {% for hinted, label in [(false, 'Исходные'), (true, 'С подсказкой')] %}
+      <a href="{{ url_for('project', project_id=project.id, run_id=run.id if run else none, query='hint' if hinted else none) }}"
+         {% if hinted == hinted_chart %}aria-current="true"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </div>
+  </header>
+  <div class="chart-body">
+    <div class="chart-controls">
+      <ul class="chart-legend" aria-label="Диапазоны позиций">
+        {% for tier, label in tiers.items() %}<li><span class="{{ tier }}"></span>{{ label }}</li>{% endfor %}
+      </ul>
+      <div class="segmented" data-chart-modes hidden aria-label="Единицы видимости">
+        <button type="button" data-chart-mode="percent" aria-pressed="true">Доля, %</button>
+        <button type="button" data-chart-mode="count" aria-pressed="false">Количество</button>
+      </div>
+    </div>
+    {% if chart|sum(attribute='total') %}
+    <div class="chart-scroll">
+      <canvas id="visibility-chart" aria-label="Распределение позиций по датам. Значения доступны в таблице графика." role="img"></canvas>
+    </div>
+    <details class="chart-data">
+      <summary>Данные графика</summary>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Значения видимости">
+        <table id="visibility-data">
+          <thead><tr><th>Дата (МСК)</th><th>Проверено</th>{% for label in tiers.values() %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for point in chart %}
+            <tr data-day="{{ point.day.strftime('%d.%m') }}">
+              <th scope="row">{{ point.day.strftime('%d.%m.%Y') }}</th>
+              <td>{{ point.total }}</td>
+              {% for value in point.counts %}
+              <td data-count="{{ value }}">{{ value }} · {{ (value * 100 / point.total if point.total else none)|metric('%') }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% else %}
+    <p class="chart-empty muted">Пока нет измерений для этого типа запроса.</p>
+    {% endif %}
+  </div>
+</section>
+<section class="panel">
+  <header class="panel-header">
+    <div><h2>История позиций</h2><p>Последнее измерение за день, до 30 дат</p></div>
+  </header>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="История позиций по датам">
+    <table class="position-matrix">
+      <thead><tr>
+        <th>Запрос</th><th>IW</th><th>Найденный URL</th>
+        {% for day in days %}<th scope="col"><time datetime="{{ day.isoformat() }}" title="{{ day.strftime('%d.%m.%Y') }} МСК">{{ day.strftime('%d.%m') }}</time></th>{% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for line in history %}
+        <tr>
+          <th scope="row">
+            {{ line.query }}
+            {% if line.hinted %}<small class="secondary-line">С подсказкой · {{ line.phrase }}</small>{% endif %}
+            {% if line.landing_url %}<small class="secondary-line">{{ line.landing_url }}</small>{% endif %}
+          </th>
+          <td>{{ line.iw|metric }}</td>
+          <td class="url-cell">{{ line.url or '—' }}</td>
+          {% for day in days %}
+          {% set sample = line.days.get(day) %}
+          {% if not sample %}<td class="matrix-cell" title="Проверка не проводилась">—</td>
+          {% elif sample.error %}<td class="matrix-cell measurement-error" title="{{ sample.at|display_date }} · {{ sample.error }}">Ошибка</td>
+          {% else %}<td class="matrix-cell {{ sample.rank|rank_tier }}" title="{{ sample.at|display_date }}{% if sample.url %} · {{ sample.url }}{% endif %}">{{ sample.rank or '51+' }}</td>{% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}

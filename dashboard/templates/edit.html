@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Редактирование проекта' if project_id else 'Новый проект' }}{% endblock %}
+{% macro field_value(value) %}{{ '' if value is none or value is undefined else value }}{% endmacro %}
 {% macro keyword_row(word) %}
 <div class="keyword-row" data-keyword>
   <label>Поисковая фраза
@@ -18,6 +19,32 @@
     <input name="brand" value="{{ word.brand }}" maxlength="399" placeholder="Бобр">
   </label>
   <button class="remove" type="button" aria-label="Удалить фразу" title="Удалить фразу" data-remove>×</button>
+  <details class="keyword-attributes">
+    <summary>Кластер и показатели</summary>
+    <div class="attributes-grid">
+      <label>Кластер<input name="cluster" value="{{ field_value(word.cluster) }}" maxlength="100"></label>
+      <label>Конкуренция
+        <select name="competition">
+          <option value="">Не указано</option>
+          {% for key, label in competition_labels.items() %}
+          <option value="{{ key }}" {% if word.competition == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% for field, label, minimum, maximum, step in [
+        ('iw', 'IW (частотность)', 0, 999999999, 1),
+        ('demand', 'Динамика спроса', -999999999, 999999999, 1),
+        ('chance', 'Шанс топа, %', 0, 100, 0.01),
+        ('power', 'Мощность, %', 0, 100, 0.01),
+        ('visits', 'Переходы в день (план)', 0, 999999999, 1),
+        ('budget', 'Бюджет в день, ₽', 0, 999999999, 0.01)
+      ] %}
+      <label>{{ label }}
+        <input type="number" name="{{ field }}" min="{{ minimum }}" max="{{ maximum }}" step="{{ step }}" value="{{ field_value(word[field]) }}">
+      </label>
+      {% endfor %}
+    </div>
+  </details>
 </div>
 {% endmacro %}
 {% block content %}
@@ -40,8 +67,14 @@
       <label>Код региона Яндекса
         <input name="region" value="{{ project.region }}" inputmode="numeric" pattern="[0-9]{1,10}" placeholder="По умолчанию">
       </label>
+      <label>Название региона
+        <input name="region_name" value="{{ field_value(project.region_name) }}" maxlength="100" placeholder="Город или страна">
+      </label>
       <label>Интервал между фразами, с
         <input name="interval_seconds" type="number" value="{{ project.interval_seconds }}" min="0" max="3600" required>
+      </label>
+      <label>Фактический расход, ₽
+        <input name="spent" type="number" value="{{ field_value(project.spent) }}" min="0" max="999999999" step="0.01">
       </label>
     </div>
   </section>
