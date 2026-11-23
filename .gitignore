@@ -1,0 +1,17 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+env/
+venv/
+
+# Логи
+*.log
+/logs/
+
+# Секреты
+.env
+
+# Браузер
+user_data_dir/
