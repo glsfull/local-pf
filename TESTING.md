@@ -1,6 +1,28 @@
 # Отчёт о проверке local-pf
 
-## Окружение и воспроизведение
+## Повторная проверка для PR №3
+
+На Linux с Python 3.12.3, Chrome 155 и зависимостями из `requirements.txt`
+контрольный пример `hello_world.py --local` под Xvfb вывел
+`local-pf Chromium check` и завершился с кодом 0. Все 15 автоматических
+тестов прошли. DrissionPage вывел предупреждения `ResourceWarning` о
+подпроцессах при запуске тестов, как и при предыдущей проверке.
+
+```bash
+xvfb-run -a python3.12 examples/hello_world.py --local
+python3.12 -m unittest discover -s tests -v
+xvfb-run -a python3.12 agent.py
+```
+
+При одиночном запуске с конфигурацией из репозитория форма на `ya.ru`
+открылась и агент отправил запрос. После отправки появилась SmartCaptcha.
+Агент завершился с кодом 1 и записал в `report.json`
+`captcha_encountered: true`, `search_result_found: false` и
+`pages_checked: []`. Переход из живой выдачи и серия из 10–20 сценариев
+остаются открытыми. Проверка Windows Docker Desktop и noVNC относится к
+этапам 1 и 3 инструкции.
+
+## Предыдущая проверка в контейнере
 
 Контейнер `dp-agent` создан из образа `qiudeng/drissionpage4-ubuntu-webdesktop-novnc`
 с монтированием проекта в `/app`. В образе Google Chrome 122.0.6261.128 и Xvfb на
