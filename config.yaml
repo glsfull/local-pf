@@ -1,0 +1,11 @@
+SEARCH_KEYWORD: "Wikipedia English main page"
+TARGET_DOMAIN: "wikipedia.org"
+TARGET_PAGES:
+  - url: "/wiki/Wikipedia:About"
+    expected_selector: "#firstHeading"
+
+SEARCH_INPUT_SELECTOR: "#text, input[name='text']"
+SEARCH_BUTTON_SELECTOR: "#search-button, button[type='submit']"
+RESULT_LINK_SELECTOR: "a.OrganicTitle-Link, .serp-item h2 a, .serp-item h3 a"
+CAPTCHA_SELECTOR: "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
+TIMEOUT_SECONDS: 15
