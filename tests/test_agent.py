@@ -1,6 +1,7 @@
 import json
 import logging
 import socket
+import stat
 import threading
 import unittest
 from dataclasses import replace
@@ -236,6 +237,19 @@ class UnitTests(unittest.TestCase):
         self.assertTrue(matches_domain("https://www.example.com:8080/path", "example.com"))
         self.assertFalse(matches_domain("https://example.com.invalid/path", "example.com"))
         self.assertFalse(matches_domain("https://other.invalid/?target=example.com", "example.com"))
+
+    @patch("agent.run", return_value=0)
+    def test_report_uses_normal_output_file_permissions(self, _):
+        config = read_config(Path(__file__).resolve().parents[1] / "config.yaml")
+        with TemporaryDirectory() as output:
+            log_dir = Path(output)
+            log_file = log_dir / "agent.log"
+            log_file.touch()
+            self.assertEqual(verify(config, log_dir), 0)
+            self.assertEqual(
+                stat.S_IMODE((log_dir / "report.json").stat().st_mode),
+                stat.S_IMODE(log_file.stat().st_mode),
+            )
 
     @patch("agent.open_browser", side_effect=PageDisconnectedError)
     def test_browser_restarts_at_most_twice(self, launch):

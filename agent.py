@@ -4,7 +4,8 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import NamedTemporaryFile, TemporaryDirectory
+from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from DrissionPage.errors import BrowserConnectError, PageDisconnectedError
@@ -63,8 +64,8 @@ def verify(config, log_dir, *, headless=False, search_home=SEARCH_HOME):
     try:
         return run(config, report, headless=headless, search_home=search_home)
     finally:
-        output = NamedTemporaryFile(mode="w", dir=log_dir, encoding="utf-8", delete=False)
-        temporary = Path(output.name)
+        temporary = log_dir / f".report-{uuid4().hex}.tmp"
+        output = temporary.open("x", encoding="utf-8")
         try:
             with output:
                 json.dump(report, output, ensure_ascii=False, indent=2)
@@ -86,13 +87,15 @@ def main():
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
-            level=logging.DEBUG if args.debug else logging.INFO,
+            level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
             handlers=[
                 logging.FileHandler(log_dir / "agent.log", encoding="utf-8"),
                 logging.StreamHandler(),
             ],
         )
+        if args.debug:
+            logging.getLogger("modules").setLevel(logging.DEBUG)
         config = read_config(args.config)
         return verify(config, log_dir, headless=args.headless)
     except Exception as error:
