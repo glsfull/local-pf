@@ -16,9 +16,14 @@
       <span>local-pf<small>Мониторинг позиций</small></span>
     </a>
     <nav aria-label="Основная навигация">
-      <a href="{{ url_for('projects') }}" {% if request.endpoint != 'settings' %}aria-current="{{ 'page' if request.endpoint == 'projects' else 'true' }}"{% endif %}>
+      <a href="{{ url_for('projects') }}" {% if request.endpoint in ('projects', 'project', 'edit_project') %}aria-current="{{ 'page' if request.endpoint == 'projects' else 'true' }}"{% endif %}>
         <span class="nav-icon grid-icon" aria-hidden="true"></span> Проекты
       </a>
+      {% if agent_logs_enabled %}
+      <a href="{{ url_for('agent_logs') }}" {% if request.endpoint == 'agent_logs' %}aria-current="page"{% endif %}>
+        <span class="nav-icon logs-icon" aria-hidden="true"></span> Логи
+      </a>
+      {% endif %}
       <a href="{{ url_for('settings') }}" {% if request.endpoint == 'settings' %}aria-current="page"{% endif %}>
         <span class="nav-icon settings-icon" aria-hidden="true"></span> Настройки
       </a>

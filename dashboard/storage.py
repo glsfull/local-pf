@@ -1,6 +1,7 @@
 from contextlib import contextmanager
-from datetime import datetime, timezone
 import sqlite3
+
+from modules.clock import timestamp
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -43,13 +44,13 @@ CREATE TABLE IF NOT EXISTS measurements (
     hint_rank INTEGER,
     checked_at TEXT,
     hinted_at TEXT,
+    found_url TEXT,
+    hint_found_url TEXT,
+    error TEXT,
+    hint_error TEXT,
     PRIMARY KEY (run_id, ordinal)
 );
 """
-
-
-def timestamp():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 @contextmanager
@@ -67,6 +68,10 @@ def connect(path):
 def initialize(path):
     with connect(path) as db:
         db.executescript(SCHEMA)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(measurements)")}
+        for column in ("found_url", "hint_found_url", "error", "hint_error"):
+            if column not in columns:
+                db.execute(f"ALTER TABLE measurements ADD COLUMN {column} TEXT")
         db.execute(
             "UPDATE runs SET state = 'interrupted', finished_at = ? WHERE state = 'running'",
             (timestamp(),),
@@ -112,4 +117,15 @@ def finish_run(db, run_id, state, error=None):
     db.execute(
         "UPDATE runs SET state = ?, error = ?, finished_at = ? WHERE id = ?",
         (state, error, timestamp(), run_id),
+    )
+
+
+def record_measurement(db, run_id, ordinal, hinted, rank, url, error):
+    columns = ("hint_rank", "hint_found_url", "hint_error", "hinted_at") if hinted else (
+        "rank", "found_url", "error", "checked_at"
+    )
+    assignments = ", ".join(f"{column} = ?" for column in columns)
+    db.execute(
+        f"UPDATE measurements SET {assignments} WHERE run_id = ? AND ordinal = ?",
+        (rank, url, error, timestamp(), run_id, ordinal),
     )

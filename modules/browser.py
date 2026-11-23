@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 
 from DrissionPage import ChromiumOptions, ChromiumPage
 from DrissionPage.errors import ContextLostError
+from psutil import NoSuchProcess, Process, TimeoutExpired
 
 
 class RunError(Exception):
@@ -18,7 +19,7 @@ class PageFailure(RunError):
 
 
 class AccessDenied(RunError):
-    pass
+    status = "ACCESS_DENIED"
 
 
 def open_browser(timeout, *, headless=False, profile=None):
@@ -36,12 +37,38 @@ def open_browser(timeout, *, headless=False, profile=None):
     return ChromiumPage(options)
 
 
+def close_browser(browser):
+    try:
+        process = Process(browser.process_id) if browser.process_id else None
+    except NoSuchProcess:
+        process = None
+    try:
+        browser.quit(force=True)
+    finally:
+        # Chrome can still be flushing its profile after the CDP connection closes.
+        if process is not None:
+            try:
+                process.wait(timeout=5)
+            except TimeoutExpired:
+                try:
+                    process.kill()
+                except NoSuchProcess:
+                    pass
+                else:
+                    process.wait(timeout=5)
+
+
 def wait_for(probe, timeout):
     deadline = time.monotonic() + timeout
     while True:
         try:
             result = probe()
         except ContextLostError:
+            result = None
+        except RuntimeError as error:
+            # Chrome temporarily detaches the page during a history navigation.
+            if "Not attached to an active page" not in str(error):
+                raise
             result = None
         if result:
             return result

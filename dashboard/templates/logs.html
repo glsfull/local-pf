@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% macro scroll(position) %}
+  {% if position %}scrollY={{ position.scrollY }} / scrollHeight={{ position.scrollHeight }} ({{ position.percent }}%)
+  {% else %}—{% endif %}
+{% endmacro %}
+{% block title %}Логи агента{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Логи агента</h1>
+    {% if report %}<p>{{ report.keyword }} · {{ report.target_domain }} · {{ report.timestamp|display_date }}</p>{% endif %}
+  </div>
+</header>
+{% if error %}
+<p class="notice failure" role="alert">{{ error }}</p>
+{% elif not report %}
+<div class="panel empty"><p>Отчёт появится после завершения проверки агентом.</p></div>
+{% else %}
+{% if report.pages_checked %}
+<section class="panel">
+  <header class="panel-header"><h2>Проверенные страницы</h2></header>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Проверенные страницы">
+    <table>
+      <thead><tr><th>URL страницы</th><th>Дата и время (МСК)</th><th>Прокрутка</th><th>Статус</th><th>Ошибка</th></tr></thead>
+      <tbody>
+        {% for page in report.pages_checked %}
+        <tr>
+          <th class="url-cell" scope="row">{{ page.url or page.target or '—' }}</th>
+          <td class="time-cell">{{ page.timestamp_msk|display_date }}</td>
+          <td>{{ scroll(page.scroll_position) }}</td>
+          <td><span class="state {{ 'complete' if page.exists else 'failed' }}">{{ page.status }}</span></td>
+          <td>{{ page.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+<section class="panel">
+  <header class="panel-header"><h2>Операции последнего прогона</h2></header>
+  {% if report.events %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Операции агента">
+    <table>
+      <thead><tr><th>Дата и время (МСК)</th><th>Операция</th><th>URL страницы</th><th>Детали</th><th>Статус и ошибки</th></tr></thead>
+      <tbody>
+        {% for event in report.events %}
+        <tr>
+          <td class="time-cell">{{ event.timestamp_msk|display_date }}</td>
+          <th scope="row">{{ event.operation }}</th>
+          <td class="url-cell">{{ event.url or '—' }}</td>
+          <td class="detail-cell">
+            {% if event.destination %}<span>{{ event.destination }}</span>{% endif %}
+            {% if event.target %}<span>Цель {{ event.target }}</span>{% endif %}
+            {% if event.selector %}<code>{{ event.selector }}</code>{% endif %}
+            {% if event.found is defined %}<span>{{ 'Найден' if event.found else 'Не найден' }}</span>{% endif %}
+            {% if event.step %}<span>Шаг {{ event.step }}</span>{% endif %}
+            {% if event.delay_seconds %}<span>Пауза {{ event.delay_seconds }} с</span>{% endif %}
+            {% if event.scroll_position %}<span>{{ scroll(event.scroll_position) }}</span>{% endif %}
+          </td>
+          <td class="status-cell">
+            {% if event.http_status %}<span class="state">HTTP {{ event.http_status }}</span>{% endif %}
+            {% if event.status %}<span class="state {{ 'failed' if event.error else ('complete' if event.status == 'OK' else '') }}">{{ event.status }}</span>{% endif %}
+            {% if event.error %}<small class="secondary-line">{{ event.error }}</small>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="notice inset">В этом отчёте нет журнала операций.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

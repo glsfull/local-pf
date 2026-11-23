@@ -67,8 +67,8 @@ def match_position(search_page, query, project_url, landing_url, region):
             host = site_host(url)
             same_site = host and (host == site or host.endswith("." + site))
             if same_site and (landing is None or page_key(url) == landing):
-                return page * PAGE_SIZE + index
-    return None
+                return page * PAGE_SIZE + index, url
+    return None, None
 
 
 class YandexSearch:

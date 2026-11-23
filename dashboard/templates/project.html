@@ -1,4 +1,15 @@
 {% extends "base.html" %}
+{% macro rank_badge(rank, checked_at, error) %}
+  {% if rank %}<span class="rank {% if rank <= 10 %}top{% endif %}">{{ rank }}</span>
+  {% elif checked_at and not error %}<span class="rank outside">Вне топ‑50</span>
+  {% else %}<span class="muted">—</span>{% endif %}
+{% endmacro %}
+{% macro query_status(rank, checked_at, error) %}
+  {% if error %}<span class="state failed">Ошибка</span>
+  {% elif rank %}<span class="state complete">OK</span>
+  {% elif checked_at %}<span class="state">NOT_FOUND</span>
+  {% else %}<span class="muted">—</span>{% endif %}
+{% endmacro %}
 {% block title %}{{ project.name }}{% endblock %}
 {% block content %}
 <a class="breadcrumb" href="{{ url_for('projects') }}">← К проектам</a>
@@ -50,23 +61,34 @@
   {% if run.error %}<p class="notice failure inset" role="alert">{{ run.error }}</p>{% endif %}
   <div class="table-scroll" tabindex="0" role="region" aria-label="Позиции по фразам">
     <table>
-      <thead><tr><th>Ключевая фраза</th><th>Релевантный URL</th><th>Без подсказки</th><th>С подсказкой</th><th>Уточнённый запрос</th></tr></thead>
+      <thead><tr><th>Ключевая фраза</th><th>Позиция без подсказки</th><th>Уточнённый запрос</th><th>Позиция с подсказкой</th><th>URL найденной страницы</th><th>Дата и время (МСК)</th><th>Статус</th></tr></thead>
       <tbody>
         {% for row in measurements %}
         <tr>
           <th scope="row">{{ row.phrase }}</th>
-          <td class="url-cell">{{ row.landing_url or 'Любая страница сайта' }}</td>
-          <td>
-            {% if row.rank %}<span class="rank {% if row.rank <= 10 %}top{% endif %}">{{ row.rank }}</span>
-            {% elif row.checked_at %}<span class="rank outside">Вне топ‑50</span>
-            {% else %}<span class="muted">—</span>{% endif %}
+          <td>{{ rank_badge(row.rank, row.checked_at, row.error) }}</td>
+          <td class="query-cell">{{ row.hint_query if row.checked_at and not row.rank and not row.error else '—' }}</td>
+          <td>{{ rank_badge(row.hint_rank, row.hinted_at, row.hint_error) }}</td>
+          <td class="url-cell">
+            {{ row.found_url or row.hint_found_url or '—' }}
+            {% if row.landing_url and not (row.found_url or row.hint_found_url) %}
+            <small class="secondary-line">Задан {{ row.landing_url }}</small>
+            {% endif %}
           </td>
-          <td>
-            {% if row.hint_rank %}<span class="rank {% if row.hint_rank <= 10 %}top{% endif %}">{{ row.hint_rank }}</span>
-            {% elif row.hinted_at %}<span class="rank outside">Вне топ‑50</span>
-            {% else %}<span class="muted">—</span>{% endif %}
+          <td class="time-cell">
+            {{ row.checked_at|display_date }}
+            {% if row.hinted_at %}<small class="secondary-line">С подсказкой</small>{{ row.hinted_at|display_date }}{% endif %}
           </td>
-          <td>{{ row.hint_query if row.checked_at and not row.rank else '—' }}</td>
+          <td class="status-cell">
+            {{ query_status(row.rank, row.checked_at, row.error) }}
+            {% if row.hinted_at %}
+            <small class="secondary-line">С подсказкой</small>
+            {{ query_status(row.hint_rank, row.hinted_at, row.hint_error) }}
+            {% endif %}
+            {% if row.error or row.hint_error %}
+            <small class="secondary-line">{{ row.error or row.hint_error }}</small>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

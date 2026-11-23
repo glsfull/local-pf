@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -6,6 +7,8 @@ import sqlite3
 from threading import Thread
 
 from flask import Flask, abort, redirect, render_template, request, session, url_for
+
+from modules.clock import MSK
 
 from .forms import read_project, validate_project
 from .runner import execute_run
@@ -21,7 +24,7 @@ RUN_STATES = {
 logger = logging.getLogger(__name__)
 
 
-def create_app(path, search_page=None, *, demo=False):
+def create_app(path, search_page=None, *, demo=False, report_path=None):
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=secrets.token_hex(32),
@@ -30,6 +33,8 @@ def create_app(path, search_page=None, *, demo=False):
         MAX_CONTENT_LENGTH=1024 * 1024,
     )
     path = Path(path)
+    if report_path is not None:
+        report_path = Path(report_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     initialize(path)
     source = "Демо-данные" if demo else "Yandex Search API"
@@ -40,15 +45,22 @@ def create_app(path, search_page=None, *, demo=False):
             "source": source,
             "configured": search_page is not None,
             "demo": demo,
+            "agent_logs_enabled": report_path is not None,
             "states": RUN_STATES,
             "csrf_token": lambda: session.setdefault("csrf", secrets.token_hex(32)),
         }
 
     @app.template_filter("display_date")
     def display_date(value):
-        if not value:
+        if not isinstance(value, str):
             return "—"
-        return datetime.fromisoformat(value).astimezone().strftime("%d.%m.%Y, %H:%M")
+        try:
+            date = datetime.fromisoformat(value)
+        except ValueError:
+            return "—"
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=MSK)
+        return date.astimezone(MSK).strftime("%d.%m.%Y, %H:%M:%S %Z")
 
     @app.before_request
     def verify_csrf():
@@ -168,5 +180,27 @@ def create_app(path, search_page=None, *, demo=False):
     @app.get("/settings")
     def settings():
         return render_template("settings.html")
+
+    @app.get("/logs")
+    def agent_logs():
+        if report_path is None:
+            abort(404)
+        report, error = None, None
+        try:
+            with report_path.open(encoding="utf-8") as file:
+                data = json.load(file)
+            if not isinstance(data, dict):
+                raise ValueError("Invalid report")
+            for key in ("events", "pages_checked"):
+                rows = data.get(key, [])
+                if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                    raise ValueError("Invalid report entries")
+            report = data
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError):
+            logger.exception("Не удалось прочитать отчёт агента")
+            error = "Не удалось прочитать report.json. Проверьте файл и права доступа."
+        return render_template("logs.html", report=report, error=error)
 
     return app
