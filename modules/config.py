@@ -25,6 +25,7 @@ class Config:
     result_link: str
     captcha: str
     timeout: float
+    observation_delay: float = 0.7
 
 
 def read_text(value, field):
@@ -82,6 +83,9 @@ def read_config(path: Path):
         or not 0 < timeout <= 120
     ):
         raise ValueError("TIMEOUT_SECONDS: требуется число в диапазоне (0, 120]")
+    delay = data.get("OBSERVATION_DELAY_SECONDS", 0.7)
+    if type(delay) not in (float, int) or not 0 <= delay <= 5:
+        raise ValueError("OBSERVATION_DELAY_SECONDS: требуется число от 0 до 5")
     return Config(
         keyword=read_text(data.get("SEARCH_KEYWORD"), "SEARCH_KEYWORD"),
         domain=domain,
@@ -98,4 +102,5 @@ def read_config(path: Path):
             "CAPTCHA_SELECTOR",
         ),
         timeout=timeout,
+        observation_delay=delay,
     )

@@ -9,3 +9,4 @@ SEARCH_BUTTON_SELECTOR: "#search-button, button[type='submit']"
 RESULT_LINK_SELECTOR: "a.OrganicTitle-Link, .serp-item h2 a, .serp-item h3 a"
 CAPTCHA_SELECTOR: "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
 TIMEOUT_SECONDS: 15
+OBSERVATION_DELAY_SECONDS: 0.7

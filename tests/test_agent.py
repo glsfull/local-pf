@@ -5,17 +5,20 @@ import stat
 import threading
 import unittest
 from dataclasses import replace
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlsplit
 
 from DrissionPage.errors import PageDisconnectedError
 
 from agent import run, verify
-from modules.browser import matches_domain
+from modules.browser import close_browser, matches_domain, wait_for
+from modules.clock import MoscowFormatter
 from modules.config import TargetPage, read_config
+from modules.journal import Journal
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -77,6 +80,8 @@ class Fixture(BaseHTTPRequestHandler):
         if url.path == "/empty":
             return "<main>Содержимое</main>", 200
         if url.path in ("/news", "/more"):
+            if mode == "target_challenge":
+                return '<input name="smart-token" type="hidden">', 403
             return """
                 <h1 id="expected">Страница работает</h1><div style="height:2400px"></div>
                 <script>
@@ -118,14 +123,20 @@ class BrowserTests(unittest.TestCase):
             report = json.loads((Path(output) / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(report["keyword"], self.config.keyword)
         self.assertEqual(report["target_domain"], self.config.domain)
-        self.assertTrue(report["timestamp"].endswith("+00:00"))
+        self.assertTrue(report["timestamp"].endswith("+03:00"))
+        self.assertTrue(report["events"])
+        self.assertTrue(all(event["timestamp_msk"].endswith("+03:00") for event in report["events"]))
         return code, report
 
     def assert_pages(self, report, *expected):
-        self.assertEqual(
-            report["pages_checked"],
-            [{"url": url, "status": status, "exists": status == "OK"} for url, status in expected],
-        )
+        pages = report["pages_checked"]
+        self.assertEqual([(page["target"], page["status"]) for page in pages], list(expected))
+        for page in pages:
+            self.assertEqual(page["exists"], page["status"] == "OK")
+            self.assertEqual(page["exists"], page["error"] is None)
+            self.assertTrue(page["timestamp_msk"].endswith("+03:00"))
+            self.assertEqual(urlsplit(page["url"]).hostname, "127.0.0.1")
+            self.assertIn("scroll_position", page)
 
     def test_search_and_click_in_same_tab(self):
         code, report = self.check_run("normal")
@@ -141,6 +152,16 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(urlsplit(requests[2][2]).hostname, "localhost")
         self.assertEqual(urlsplit(requests[3][2]).path, "/landing")
         self.assert_pages(report, ("/news", "OK"))
+        page = report["pages_checked"][0]
+        events = report["events"]
+        scrolls = [event for event in events if event["operation"] == "Позиция прокрутки"]
+        self.assertEqual([event["step"] for event in scrolls], [1, 2, 3])
+        self.assertTrue(all(event["url"] == page["url"] for event in scrolls))
+        self.assertEqual(page["scroll_position"], scrolls[-1]["scroll_position"])
+        self.assertEqual(urlsplit(page["url"]).path, "/news")
+        self.assertGreater(page["scroll_position"]["scrollY"], 0)
+        self.assertGreater(page["scroll_position"]["scrollHeight"], 2400)
+        self.assertGreater(page["scroll_position"]["percent"], 0)
 
     def test_new_tabs_and_history(self):
         code, report = self.check_run(
@@ -200,6 +221,13 @@ class BrowserTests(unittest.TestCase):
             report, ("/gone", "NOT_FOUND"), ("/broken", "HTTP_ERROR"),
             ("/empty", "NOT_FOUND"), ("/news", "OK"),
         )
+        errors = [event for event in report["events"] if event["operation"] == "Ошибка"]
+        self.assertEqual([urlsplit(event["url"]).path for event in errors], ["/gone", "/broken", "/empty"])
+        self.assertIn("HTTP 404", errors[0]["error"])
+        self.assertIn("HTTP 503", errors[1]["error"])
+        check = next(event for event in report["events"] if
+                     event["operation"] == "Проверка элемента" and event["url"].endswith("/empty"))
+        self.assertEqual((check["selector"], check["found"], check["status"]), ("h1", False, "NOT_FOUND"))
 
     def test_click_timeout_does_not_prevent_next_check(self):
         code, report = self.check_run(
@@ -215,6 +243,7 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(any(path == "/drop" for path, _, _ in self.server.requests))
         self.assert_pages(report, ("/drop", "NETWORK_ERROR"), ("/news", "OK"))
+        self.assertTrue(report["pages_checked"][0]["url"].endswith("/drop"))
 
     def test_search_service_refuses_access(self):
         code, report = self.check_run("blocked")
@@ -231,25 +260,76 @@ class BrowserTests(unittest.TestCase):
         self.assert_pages(report, ("/denied", "ACCESS_DENIED"))
         self.assertFalse(any(path == "/news" for path, _, _ in self.server.requests))
 
+    def test_target_challenge_is_linked_to_the_page_and_stops_checks(self):
+        code, report = self.check_run(
+            "target_challenge", TargetPage("/news", url="/news"), TargetPage("/more", url="/more")
+        )
+        self.assertEqual(code, 1)
+        self.assertTrue(report["captcha_encountered"])
+        self.assert_pages(report, ("/news", "CAPTCHA"))
+        self.assertEqual(report["events"][-1]["status"], "CAPTCHA")
+        self.assertTrue(report["events"][-1]["url"].endswith("/news"))
+        self.assertFalse(any(path == "/more" for path, _, _ in self.server.requests))
+
 
 class UnitTests(unittest.TestCase):
+    @patch("modules.browser.time.sleep")
+    def test_wait_for_page_to_reattach_after_navigation(self, _):
+        probe = Mock(side_effect=[RuntimeError("Not attached to an active page"), "loaded"])
+        self.assertEqual(wait_for(probe, 1), "loaded")
+        with self.assertRaisesRegex(RuntimeError, "Unknown browser error"):
+            wait_for(Mock(side_effect=RuntimeError("Unknown browser error")), 1)
+
     def test_domain_matching_uses_hostname_boundaries(self):
         self.assertTrue(matches_domain("https://www.example.com:8080/path", "example.com"))
         self.assertFalse(matches_domain("https://example.com.invalid/path", "example.com"))
         self.assertFalse(matches_domain("https://other.invalid/?target=example.com", "example.com"))
 
-    @patch("agent.run", return_value=0)
-    def test_report_uses_normal_output_file_permissions(self, _):
+    @patch("agent.check_pages")
+    @patch("agent.find_target")
+    @patch("agent.open_browser")
+    def test_report_is_readable_before_browser_closes(self, launch, *_):
         config = read_config(Path(__file__).resolve().parents[1] / "config.yaml")
         with TemporaryDirectory() as output:
             log_dir = Path(output)
             log_file = log_dir / "agent.log"
             log_file.touch()
+            report_path = log_dir / "report.json"
+            observed = []
+
+            def check_report(**_):
+                observed.append((
+                    json.loads(report_path.read_text(encoding="utf-8"))["keyword"],
+                    stat.S_IMODE(report_path.stat().st_mode),
+                ))
+
+            checked = Mock(side_effect=check_report)
+            launch.return_value.process_id = None
+            launch.return_value.quit.side_effect = checked
             self.assertEqual(verify(config, log_dir), 0)
-            self.assertEqual(
-                stat.S_IMODE((log_dir / "report.json").stat().st_mode),
-                stat.S_IMODE(log_file.stat().st_mode),
-            )
+            checked.assert_called_once_with(force=True)
+            self.assertEqual(observed, [(config.keyword, stat.S_IMODE(log_file.stat().st_mode))])
+
+    @patch("modules.browser.Process")
+    def test_browser_shutdown_waits_for_profile_writes(self, process):
+        closed = Mock()
+        browser = Mock(process_id=42)
+        closed.attach_mock(browser.quit, "quit")
+        closed.attach_mock(process.return_value.wait, "wait")
+        close_browser(browser)
+        process.assert_called_once_with(42)
+        self.assertEqual([call[0] for call in closed.mock_calls], ["quit", "wait"])
+
+    @patch("modules.journal.sleep")
+    def test_observation_step_and_log_use_moscow_time(self, sleep):
+        events = []
+        Journal(events, 0.7).step("Прокрутка", "https://example.org/", step=1)
+        sleep.assert_called_once_with(0.7)
+        self.assertEqual(events[0]["delay_seconds"], 0.7)
+        self.assertTrue(events[0]["timestamp_msk"].endswith("+03:00"))
+        record = logging.LogRecord("agent", logging.INFO, "", 0, "step", (), None)
+        record.created = datetime.fromisoformat("2026-11-23T22:24:30+00:00").timestamp()
+        self.assertEqual(MoscowFormatter("%(asctime)s").format(record), "2026-11-24 01:24:30 MSK")
 
     @patch("agent.open_browser", side_effect=PageDisconnectedError)
     def test_browser_restarts_at_most_twice(self, launch):
