@@ -1,5 +1,6 @@
 import argparse
 from datetime import datetime
+from functools import partial
 import logging
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ from werkzeug.serving import WSGIRequestHandler
 from modules.clock import MSK, MoscowFormatter
 
 from . import create_app
-from .search import YandexSearch
+from .agent_process import execute_agent
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,21 +27,26 @@ def main():
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--db", type=Path, default=Path(".local-pf/dashboard.sqlite3"))
     parser.add_argument("--agent-log-dir", type=Path, help="Папка с отчётом браузерного агента")
+    parser.add_argument("--agent-container", default="dp-agent", help="Имя контейнера Chromium/noVNC")
+    parser.add_argument("--container-db", help="Путь к общей SQLite-базе внутри контейнера")
+    parser.add_argument("--container-log-dir", help="Путь к общей папке логов внутри контейнера")
+    parser.add_argument("--local-agent", action="store_true", help="Chromium на локальном DISPLAY=:1")
     parser.add_argument("--debug-log", action="store_true")
     args = parser.parse_args()
     handler = logging.StreamHandler()
     handler.setFormatter(MoscowFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     logging.basicConfig(level=logging.DEBUG if args.debug_log else logging.INFO, handlers=[handler])
     load_dotenv(ROOT / ".env")
-    key = os.environ.get("YANDEX_SEARCH_API_KEY", "").strip()
-    folder = os.environ.get("YANDEX_SEARCH_FOLDER_ID", "").strip()
-    source = YandexSearch(key, folder) if key and folder else None
     path = args.db.resolve()
-    log_dir = args.agent_log_dir or Path(os.getenv("LOG_DIR", ROOT / "logs"))
+    args.log_dir = (args.agent_log_dir or Path(os.getenv("LOG_DIR", ROOT / "logs"))).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with FileLock(f"{path}.lock", timeout=0):
-            create_app(path, source, report_path=log_dir / "report.json").run(
+            app = create_app(
+                path, report_path=args.log_dir / "report.json",
+                agent_runner=partial(execute_agent, options=args),
+            )
+            app.run(
                 host="127.0.0.1", port=args.port, request_handler=MoscowRequestHandler,
             )
     except Timeout:

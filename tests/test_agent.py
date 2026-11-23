@@ -14,11 +14,15 @@ from urllib.parse import parse_qs, urlsplit
 
 from DrissionPage.errors import PageDisconnectedError
 
-from agent import run, verify
-from modules.browser import close_browser, matches_domain, wait_for
+from agent import run, verify, verify_positions
+from dashboard import create_app
+from dashboard.search import SearchError
+from dashboard.storage import connect, save_project
+from modules.browser import close_browser, matches_domain, open_browser, wait_for
 from modules.clock import MoscowFormatter
 from modules.config import TargetPage, read_config
 from modules.journal import Journal
+from modules.rank_parser import RankParser
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -59,6 +63,22 @@ class Fixture(BaseHTTPRequestHandler):
             decoy = '<a class="result" href="http://localhost.invalid">Другой сайт</a>'
             match = f'<a class="result" {attrs} href="{target}/landing">Цель</a>'
             return decoy + ("" if mode == "missing_site" else match), 200
+        if url.path == "/ranks":
+            params = parse_qs(url.query)
+            if mode == "rank_challenge":
+                return '<input name="smart-token" type="hidden">', 403
+            if mode == "rank_limit":
+                return "<h1>Limit</h1>", 429
+            if mode == "rank_empty":
+                return '<div class="SearchEmpty">Нет результатов</div>', 200
+            if mode == "rank_unknown":
+                return "<h1>Unexpected layout</h1>", 200
+            relevant = '<li class="serp-item"><h2><a href="https://example.org/target/">Цель</a></h2></li>'
+            other = (
+                '<li class="serp-item"><h2><a class="OrganicTitle-Link" href="https://other.example/">'
+                'Другой сайт</a></h2><a class="OrganicTitle-Link" href="https://other.example/sub">Раздел</a></li>'
+            )
+            return other + (relevant if params["text"] == ["проверка Бренд"] and params["p"] == ["1"] else ""), 200
         if url.path == "/landing":
             return """
                 <h1>Входная страница</h1>
@@ -162,6 +182,61 @@ class BrowserTests(unittest.TestCase):
         self.assertGreater(page["scroll_position"]["scrollY"], 0)
         self.assertGreater(page["scroll_position"]["scrollHeight"], 2400)
         self.assertGreater(page["scroll_position"]["percent"], 0)
+
+    def test_rank_agent_reads_database_and_stores_report(self):
+        self.server.mode, self.server.requests = "normal", []
+        with TemporaryDirectory() as output:
+            root = Path(output)
+            path = root / "dashboard.sqlite3"
+            client = create_app(path).test_client()
+            with connect(path) as db:
+                project_id = save_project(db, None, ("Рейтинг", "https://example.org", "213", 0), [
+                    ("проверка", "https://example.org/target/", "brand", "Бренд"),
+                ])
+            with (
+                patch.dict("os.environ", {
+                    "LOCAL_PF_RESULTS_URL": self.search_home + "/ranks",
+                    "LOCAL_PF_OBSERVATION_DELAY": "0",
+                }),
+                patch("modules.rank_parser.open_browser", side_effect=lambda *args, **kwargs: open_browser(
+                    *args, **kwargs, headless=True,
+                )),
+            ):
+                self.assertEqual(verify_positions(path, root, project_id=project_id), 0)
+            with connect(path) as db:
+                run = db.execute("SELECT * FROM runs").fetchone()
+                row = db.execute("SELECT * FROM measurements").fetchone()
+            self.assertIsNone(row["rank"])
+            self.assertEqual(row["hint_rank"], 3)
+            self.assertEqual(row["hint_found_url"], "https://example.org/target/")
+            self.assertTrue(row["hinted_at"].endswith("+03:00"))
+            report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(report["pages_checked"]), 7)
+            self.assertTrue(all(page["timestamp_msk"].endswith("+03:00") for page in report["pages_checked"]))
+            html = client.get(f"/projects/{project_id}/runs/{run['id']}/logs").get_data(as_text=True)
+            self.assertIn("Разбор выдачи", html)
+            self.assertIn("проверка Бренд", html)
+            requests = [(path, parse_qs(query)) for path, query, _ in self.server.requests if path != "/favicon.ico"]
+            self.assertTrue(all(path == "/ranks" and fields["lr"] == ["213"] for path, fields in requests))
+
+    def test_rank_parser_distinguishes_empty_layout_challenge_and_rate_limit(self):
+        self.server.requests = []
+        report = {"events": [], "pages_checked": [], "captcha_encountered": False}
+        with patch.dict("os.environ", {"LOCAL_PF_RESULTS_URL": self.search_home + "/ranks"}):
+            parser = RankParser(Journal(report["events"], 0), report, timeout=2)
+        parser.browser = open_browser(2, headless=True)
+        self.addCleanup(close_browser, parser.browser)
+        self.server.mode = "rank_empty"
+        self.assertEqual(parser("проверка", 0, ""), [])
+        for mode, status in (
+            ("rank_unknown", "PARSE_ERROR"), ("rank_challenge", "CAPTCHA"), ("rank_limit", "ACCESS_DENIED"),
+        ):
+            with self.subTest(mode=mode):
+                self.server.mode = mode
+                with self.assertRaisesRegex(SearchError, status):
+                    parser("проверка", 0, "")
+                self.assertEqual(report["pages_checked"][-1]["status"], status)
+        self.assertTrue(report["captcha_encountered"])
 
     def test_new_tabs_and_history(self):
         code, report = self.check_run(

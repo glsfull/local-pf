@@ -6,19 +6,16 @@
     <h1>Проекты</h1>
     <p>Ключевые фразы и позиции сайтов в поиске Яндекса.</p>
   </div>
-  <a class="button primary" href="{{ url_for('edit_project') }}"><span aria-hidden="true">＋</span> Добавить проект</a>
+  <a class="button primary" href="{{ url_for('edit_project') }}"><span aria-hidden="true">＋</span> Создать проект</a>
 </header>
 {% if projects %}
-<div class="summary-grid">
-  <div><span>Проекты</span><strong>{{ projects|length }}</strong></div>
-  <div><span>Ключевые фразы</span><strong>{{ projects|sum(attribute='keyword_count') }}</strong></div>
-  <div><span>Проверки сейчас</span><strong>{{ projects|selectattr('state', 'equalto', 'running')|list|length }}</strong></div>
-</div>
 <section class="panel">
-  <header class="panel-header"><h2>Все проекты</h2></header>
   <div class="table-scroll" tabindex="0" role="region" aria-label="Список проектов">
     <table>
-      <thead><tr><th>Проект</th><th>Фразы</th><th>Интервал</th><th>Последняя проверка</th><th>Статус</th></tr></thead>
+      <thead><tr>
+        <th>Название</th><th>Статус</th><th>Регион</th><th>Ключевики</th><th>Видимость</th>
+        <th>Ср. мощность</th><th>Переходы в день</th><th>Бюджет в день</th><th>Расход</th><th>Последняя проверка</th>
+      </tr></thead>
       <tbody>
         {% for item in projects %}
         <tr>
@@ -26,10 +23,15 @@
             <a href="{{ url_for('project', project_id=item.id) }}">{{ item.name }}</a>
             <span class="secondary-line">{{ item.url }}</span>
           </th>
+          <td><span class="state {{ item.state or '' }}">{{ 'Запущен' if item.state == 'running' else states.get(item.state, 'Нет проверок') }}</span></td>
+          <td>{{ item.region_name or item.region or '—' }}</td>
           <td>{{ item.keyword_count }}</td>
-          <td>{{ item.interval_seconds }} с</td>
-          <td>{{ item.started_at|display_date }}</td>
-          <td><span class="state {{ item.state or '' }}">{{ states.get(item.state, 'Нет проверок') }}</span></td>
+          <td title="Доля измеренных фраз в топ-50 в последней проверке">{{ (100 * item.in_top / item.measured if item.measured else none)|metric('%') }}</td>
+          <td>{{ item.power|metric('%') }}</td>
+          <td>{{ item.visits|metric }}</td>
+          <td>{{ item.budget|metric(' ₽') }}</td>
+          <td>{{ item.spent|metric(' ₽') }}</td>
+          <td class="time-cell">{{ item.started_at|display_date }}</td>
         </tr>
         {% endfor %}
       </tbody>

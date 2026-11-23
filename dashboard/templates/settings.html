@@ -9,13 +9,8 @@
   {% if demo %}
   <p>Панель использует локальный пример поисковой выдачи.</p>
   {% else %}
-  <p><span class="state {{ 'complete' if configured else '' }}">{{ 'Реквизиты заданы' if configured else 'Требуется подключение' }}</span></p>
-  <p>Укажите API‑ключ сервисного аккаунта и идентификатор каталога в файле <code>.env</code> или переменных окружения, затем перезапустите панель.</p>
-  <dl>
-    <dt><code>YANDEX_SEARCH_API_KEY</code></dt><dd>API‑ключ сервисного аккаунта</dd>
-    <dt><code>YANDEX_SEARCH_FOLDER_ID</code></dt><dd>Идентификатор каталога Yandex Cloud</dd>
-  </dl>
-  <p><a href="https://aistudio.yandex.ru/ru/docs/search-api/quickstart/">Инструкция Yandex Search API ↗</a></p>
+  <p>Агент читает фразы из общей базы SQLite и записывает туда результаты проверки.</p>
+  <p>Запустите контейнер агента и держите <a href="http://localhost:56565/">noVNC</a> открытым во время прогона.</p>
   {% endif %}
 </section>
 {% endblock %}

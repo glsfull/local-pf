@@ -30,7 +30,7 @@
     </nav>
     <a class="provider" href="{{ url_for('settings') }}">
       <span class="provider-dot {{ 'ready' if configured else '' }}" aria-hidden="true"></span>
-      <span>{{ source }}<small>{{ 'Локальный пример' if demo else ('Реквизиты заданы' if configured else 'Требуется подключение') }}</small></span>
+      <span>{{ source }}<small>{{ 'Локальный пример' if demo else ('Chromium · noVNC' if configured else 'Требуется подключение') }}</small></span>
     </a>
   </aside>
   <main id="main">
