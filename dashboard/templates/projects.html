@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Проекты{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <h1>Проекты</h1>
+    <p>Ключевые фразы и позиции сайтов в поиске Яндекса.</p>
+  </div>
+  <a class="button primary" href="{{ url_for('edit_project') }}"><span aria-hidden="true">＋</span> Добавить проект</a>
+</header>
+{% if projects %}
+<div class="summary-grid">
+  <div><span>Проекты</span><strong>{{ projects|length }}</strong></div>
+  <div><span>Ключевые фразы</span><strong>{{ projects|sum(attribute='keyword_count') }}</strong></div>
+  <div><span>Проверки сейчас</span><strong>{{ projects|selectattr('state', 'equalto', 'running')|list|length }}</strong></div>
+</div>
+<section class="panel">
+  <header class="panel-header"><h2>Все проекты</h2></header>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Список проектов">
+    <table>
+      <thead><tr><th>Проект</th><th>Фразы</th><th>Интервал</th><th>Последняя проверка</th><th>Статус</th></tr></thead>
+      <tbody>
+        {% for item in projects %}
+        <tr>
+          <th scope="row">
+            <a href="{{ url_for('project', project_id=item.id) }}">{{ item.name }}</a>
+            <span class="secondary-line">{{ item.url }}</span>
+          </th>
+          <td>{{ item.keyword_count }}</td>
+          <td>{{ item.interval_seconds }} с</td>
+          <td>{{ item.started_at|display_date }}</td>
+          <td><span class="state {{ item.state or '' }}">{{ states.get(item.state, 'Нет проверок') }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="panel empty">
+  <h2>Список проектов пуст</h2>
+  <p>Добавьте сайт и поисковые фразы, чтобы начать наблюдение за позициями.</p>
+</section>
+{% endif %}
+{% endblock %}

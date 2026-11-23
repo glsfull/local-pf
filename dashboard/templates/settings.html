@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div><h1>Настройки</h1><p>Подключение источника позиций.</p></div>
+</header>
+<section class="panel form-panel connection">
+  <h2>{{ source }}</h2>
+  {% if demo %}
+  <p>Панель использует локальный пример поисковой выдачи.</p>
+  {% else %}
+  <p><span class="state {{ 'complete' if configured else '' }}">{{ 'Реквизиты заданы' if configured else 'Требуется подключение' }}</span></p>
+  <p>Укажите API‑ключ сервисного аккаунта и идентификатор каталога в файле <code>.env</code> или переменных окружения, затем перезапустите панель.</p>
+  <dl>
+    <dt><code>YANDEX_SEARCH_API_KEY</code></dt><dd>API‑ключ сервисного аккаунта</dd>
+    <dt><code>YANDEX_SEARCH_FOLDER_ID</code></dt><dd>Идентификатор каталога Yandex Cloud</dd>
+  </dl>
+  <p><a href="https://aistudio.yandex.ru/ru/docs/search-api/quickstart/">Инструкция Yandex Search API ↗</a></p>
+  {% endif %}
+</section>
+{% endblock %}

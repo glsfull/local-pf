@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Редактирование проекта' if project_id else 'Новый проект' }}{% endblock %}
+{% macro keyword_row(word) %}
+<div class="keyword-row" data-keyword>
+  <label>Поисковая фраза
+    <input name="phrase" value="{{ word.phrase }}" maxlength="399" placeholder="Натяжные потолки">
+  </label>
+  <label>Релевантный URL
+    <input name="landing_url" type="url" value="{{ word.landing_url }}" maxlength="2048" placeholder="Любая страница сайта">
+  </label>
+  <label>Тип подсказки
+    <select name="hint_type">
+      <option value="domain" {% if word.hint_type != 'brand' %}selected{% endif %}>Домен без зоны</option>
+      <option value="brand" {% if word.hint_type == 'brand' %}selected{% endif %}>Бренд</option>
+    </select>
+  </label>
+  <label data-brand>Бренд
+    <input name="brand" value="{{ word.brand }}" maxlength="399" placeholder="Бобр">
+  </label>
+  <button class="remove" type="button" aria-label="Удалить фразу" title="Удалить фразу" data-remove>×</button>
+</div>
+{% endmacro %}
+{% block content %}
+<a class="breadcrumb" href="{{ url_for('project', project_id=project_id) if project_id else url_for('projects') }}">← {{ 'К проекту' if project_id else 'К проектам' }}</a>
+<header class="page-header">
+  <div><h1>{{ 'Редактирование проекта' if project_id else 'Новый проект' }}</h1></div>
+</header>
+{% if error %}<p class="notice failure" role="alert">{{ error }}</p>{% endif %}
+<form method="post" id="project-form">
+  <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+  <section class="panel form-panel">
+    <h2>Сайт и поиск</h2>
+    <div class="project-fields">
+      <label>Название проекта
+        <input name="name" value="{{ project.name }}" maxlength="100" required placeholder="Мастер Бобр">
+      </label>
+      <label>Адрес сайта
+        <input name="url" type="url" value="{{ project.url }}" maxlength="2048" required placeholder="https://example.ru/">
+      </label>
+      <label>Код региона Яндекса
+        <input name="region" value="{{ project.region }}" inputmode="numeric" pattern="[0-9]{1,10}" placeholder="По умолчанию">
+      </label>
+      <label>Интервал между фразами, с
+        <input name="interval_seconds" type="number" value="{{ project.interval_seconds }}" min="0" max="3600" required>
+      </label>
+    </div>
+  </section>
+  <section class="panel form-panel">
+    <h2>Ключевые фразы</h2>
+    <p class="muted">Если нужная страница за пределами топ‑50, проверка повторит запрос с выбранной подсказкой.</p>
+    <div id="keywords">
+      {% for word in keywords or [{}] %}{{ keyword_row(word) }}{% endfor %}
+    </div>
+    <template id="keyword-template">{{ keyword_row({}) }}</template>
+    <button class="button" type="button" id="add-keyword">＋ Добавить фразу</button>
+  </section>
+  <button class="button primary" type="submit">{{ 'Сохранить изменения' if project_id else 'Создать проект' }}</button>
+</form>
+{% endblock %}
