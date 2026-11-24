@@ -1,16 +1,37 @@
 {% extends "base.html" %}
-{% block title %}Настройки{% endblock %}
+{% block title %}Настройки панели{% endblock %}
 {% block content %}
-<header class="page-header">
-  <div><h1>Настройки</h1><p>Подключение источника позиций.</p></div>
-</header>
-<section class="panel form-panel connection">
-  <h2>{{ source }}</h2>
-  {% if demo %}
-  <p>Панель использует локальный пример поисковой выдачи.</p>
-  {% else %}
-  <p>Агент читает фразы из общей базы SQLite и записывает туда результаты проверки.</p>
-  <p>Запустите контейнер агента и держите <a href="http://localhost:56565/">noVNC</a> открытым во время прогона.</p>
-  {% endif %}
-</section>
+<div class="narrow">
+  <header class="page-header">
+    <div class="title-row"><h1>Настройки панели</h1></div>
+    <a class="back-link" href="{{ url_for('projects') }}"><span aria-hidden="true">↺</span> Вернуться к списку проектов</a>
+  </header>
+  {% if error %}<p class="alert error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" class="card form-card stack">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <div class="field">
+      <label class="field-label" for="balance">Баланс, ₽</label>
+      <input id="balance" name="balance" inputmode="decimal" value="{{ values.balance }}" placeholder="Не учитывать">
+      <p class="hint">Пустое поле — баланс не учитывается. При нуле и меньше панель показывает предупреждение и не запускает сбор позиций.</p>
+    </div>
+    <div class="field">
+      <label class="field-label" for="user-name">Имя пользователя</label>
+      <input id="user-name" name="user_name" value="{{ values.user_name }}" maxlength="50" placeholder="{{ user_name }}">
+    </div>
+    <div class="field">
+      <label class="field-label" for="telegram-url">Ссылка на Телеграм-группу</label>
+      <input id="telegram-url" name="telegram_url" value="{{ values.telegram_url }}" maxlength="2048" placeholder="https://t.me/…">
+    </div>
+    <div><button class="button primary" type="submit">Сохранить</button></div>
+  </form>
+  <section class="card connection">
+    <h2>Настройки подключения · {{ source }}</h2>
+    {% if demo %}
+    <p>Панель использует локальный пример поисковой выдачи.</p>
+    {% else %}
+    <p>Агент читает фразы из общей базы SQLite и записывает туда результаты проверки.</p>
+    <p>Запустите контейнер агента и держите <a href="http://localhost:56565/">noVNC</a> открытым во время прогона.</p>
+    {% endif %}
+  </section>
+</div>
 {% endblock %}

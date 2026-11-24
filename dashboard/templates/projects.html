@@ -2,44 +2,64 @@
 {% block title %}Проекты{% endblock %}
 {% block content %}
 <header class="page-header">
-  <div>
+  <div class="title-row">
     <h1>Проекты</h1>
-    <p>Ключевые фразы и позиции сайтов в поиске Яндекса.</p>
+    <a class="button outline" href="{{ url_for('edit_project') }}">Создать проект</a>
   </div>
-  <a class="button primary" href="{{ url_for('edit_project') }}"><span aria-hidden="true">＋</span> Создать проект</a>
+  <a class="link-action" href="{{ url_for('settings') }}"><span class="icon-gear" aria-hidden="true"></span> Настроить группы</a>
 </header>
+{% if low_balance %}
+<p class="alert error" role="alert">На балансе недостаточно средств. Переходы по проектам приостановлены</p>
+{% endif %}
 {% if projects %}
-<section class="panel">
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Список проектов">
-    <table>
-      <thead><tr>
-        <th>Название</th><th>Статус</th><th>Регион</th><th>Ключевики</th><th>Видимость</th>
-        <th>Ср. мощность</th><th>Переходы в день</th><th>Бюджет в день</th><th>Расход</th><th>Последняя проверка</th>
-      </tr></thead>
-      <tbody>
-        {% for item in projects %}
-        <tr>
-          <th scope="row">
-            <a href="{{ url_for('project', project_id=item.id) }}">{{ item.name }}</a>
-            <span class="secondary-line">{{ item.url }}</span>
-          </th>
-          <td><span class="state {{ item.state or '' }}">{{ 'Запущен' if item.state == 'running' else states.get(item.state, 'Нет проверок') }}</span></td>
-          <td>{{ item.region_name or item.region or '—' }}</td>
-          <td>{{ item.keyword_count }}</td>
-          <td title="Доля измеренных фраз в топ-50 в последней проверке">{{ (100 * item.in_top / item.measured if item.measured else none)|metric('%') }}</td>
-          <td>{{ item.power|metric('%') }}</td>
-          <td>{{ item.visits|metric }}</td>
-          <td>{{ item.budget|metric(' ₽') }}</td>
-          <td>{{ item.spent|metric(' ₽') }}</td>
-          <td class="time-cell">{{ item.started_at|display_date }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Список проектов">
+  <table class="data-table projects-table">
+    <thead><tr>
+      <th class="check-col"><input type="checkbox" aria-label="Выбрать все проекты" data-check-all></th>
+      <th>Название</th><th>Статус</th><th>Регион</th><th>Ключевики</th><th>Видимость</th><th>Ср.мощность</th>
+      <th>Переходов в день</th><th>Бюджет в день</th><th>Переходов сегодня</th><th>Расход сегодня</th>
+    </tr></thead>
+    <tbody>
+      {% for item in projects %}
+      {% set row = item.row %}
+      <tr>
+        <td class="check-col"><input type="checkbox" aria-label="Выбрать {{ row.name }}" data-check></td>
+        <th scope="row" class="name-cell">
+          <a href="{{ url_for('project', project_id=row.id) }}">{{ row.name }}</a>
+          {% if item.attention %}<span class="warn-icon" title="{{ row.run_error or 'Проект требует внимания' }}" aria-label="Проект требует внимания">⚠</span>{% endif %}
+          {% if row.name != row.url %}<small class="secondary-line">{{ row.url }}</small>{% endif %}
+        </th>
+        <td>
+          {% if item.settings.paused %}<span class="pill stopped">Остановлен</span>
+          {% else %}<span class="pill running">Запущен</span>{% endif %}
+        </td>
+        <td>{{ item.region or '—' }}</td>
+        <td class="nowrap">{{ row.keyword_count }}{% if row.demand and row.demand > 0 %} <span class="delta up" title="Суммарный спрос по ключевикам">{{ row.demand|signed }}</span>{% endif %}</td>
+        <td class="nowrap"><b>{{ item.visibility|metric('%') }}</b>{% if item.change %} <span class="delta {{ 'up' if item.change > 0 else 'down' }}">{{ item.change|signed('%') }}</span>{% endif %}</td>
+        <td>{{ row.power|metric('%') }}</td>
+        <td>{{ row.visits|metric }}</td>
+        <td>{{ row.budget|metric(' ₽') }}</td>
+        <td>{{ row.visits_today|metric }}</td>
+        <td>{{ row.cost_today|metric(' ₽') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr>
+      <td></td>
+      <th scope="row">Итого <span class="info" title="Сумма по всем проектам; мощность — среднее значение">ⓘ</span></th>
+      <td></td><td></td>
+      <td>{{ totals.keyword_count|metric }}</td>
+      <td></td>
+      <td>{{ totals.power|metric('%') }}</td>
+      <td>{{ totals.visits|metric }}</td>
+      <td>{{ totals.budget|metric(' ₽') }}</td>
+      <td>{{ totals.visits_today|metric }}</td>
+      <td>{{ totals.cost_today|metric(' ₽') }}</td>
+    </tr></tfoot>
+  </table>
+</div>
 {% else %}
-<section class="panel empty">
+<section class="empty">
   <h2>Список проектов пуст</h2>
   <p>Добавьте сайт и поисковые фразы, чтобы начать наблюдение за позициями.</p>
 </section>

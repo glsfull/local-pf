@@ -1,0 +1,79 @@
+{% from 'partials/macros.html' import pagination_bar, period_filters %}
+{% macro visit_cell(cell, total=false) %}
+<div class="visit-box">
+  <span class="visit-depth" title="Средняя глубина просмотра">{{ cell.depth|metric if cell.depth is not none else '—' }}</span>
+  <span class="visit-done" title="Выполнено / запланировано переходов">{{ cell.done }}/{{ cell.planned }}</span>
+  <span class="visit-cost" title="Расход">{{ cell.cost|metric(' ₽') }}</span>
+</div>
+{% endmacro %}
+{% set extra = {'brand': visits.brand, 'deleted': '1' if visits.deleted else ''} %}
+<details class="explain">
+  <summary><span class="info" aria-hidden="true">ⓘ</span> Что означают числа в таблице</summary>
+  <div class="explain-body">
+    <div class="visit-box sample visit-ok"><span class="visit-depth">2,4</span><span class="visit-done">8/10</span><span class="visit-cost">48 ₽</span></div>
+    <ul>
+      <li><b>Крупное число</b> — средняя глубина просмотра сайта после перехода из поиска.</li>
+      <li><b>Справа вверху</b> — выполнено и запланировано переходов за день.</li>
+      <li><b>Справа внизу</b> — расход за день по запросу.</li>
+      <li>Цвет: <span class="legend-box visit-ok"></span> переходы выполнены, <span class="legend-box visit-high"></span> высокая глубина (3 и больше), <span class="legend-box visit-miss"></span> переходов не было.</li>
+    </ul>
+  </div>
+</details>
+{% call period_filters(project, 'visits', visits.period, visits.since, visits.until, extra) %}
+  <div class="segmented" role="group" aria-label="Брендовые запросы">
+    {% for key, label in [('', 'Все'), ('nobrand', 'Без брендовых'), ('brand', 'Только с брендовыми')] %}
+    <a href="{{ url_for('project', project_id=project.id, view='visits', **dict(request.args.to_dict(), brand=key or none, page=none)) }}" {% if visits.brand == key %}aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  <label class="check-label"><input type="checkbox" name="deleted" value="1" {% if visits.deleted %}checked{% endif %}> С удаленными</label>
+  <a class="button outline small push-right" href="{{ url_for('export', project_id=project.id, kind='visits', **request.args.to_dict()) }}">Экспортировать</a>
+{% endcall %}
+{% if visits.days %}
+<div class="table-scroll matrix-scroll" tabindex="0" role="region" aria-label="Переходы по дням">
+  <table class="position-matrix visits-matrix">
+    <thead><tr>
+      <th class="sticky-1">Запрос</th><th class="sticky-2 url-head">Найденный URL</th>
+      {% for day in visits.days %}<th scope="col" class="day-col"><time datetime="{{ day.isoformat() }}">{{ day.strftime('%d.%m') }}</time></th>{% endfor %}
+    </tr></thead>
+    <tbody>
+      <tr class="total-row">
+        <th scope="row" class="sticky-1">Итого<small class="secondary-line">{{ visits.summary.done }}/{{ visits.summary.planned }} · {{ visits.summary.cost|metric(' ₽') }}</small></th>
+        <td class="sticky-2"></td>
+        {% for day in visits.days %}
+        {% set cell = visits.totals[day.isoformat()] %}
+        <td class="visit-cell {{ cell|visit_class }}">{{ visit_cell(cell, true) }}</td>
+        {% endfor %}
+      </tr>
+      {% for line in visits.lines %}
+      <tr class="{{ 'deleted' if line.deleted }}">
+        <th scope="row" class="sticky-1">
+          {{ line.phrase }}{% if line.deleted %} <span class="muted">(удалён)</span>{% endif %}
+          <small class="secondary-line">{{ line.cost|metric(' ₽') }}</small>
+        </th>
+        <td class="sticky-2 url-cell">{{ line.url or '—' }}</td>
+        {% for day in visits.days %}
+        {% set cell = line.days.get(day.isoformat()) %}
+        {% if cell %}<td class="visit-cell {{ cell|visit_class }}">{{ visit_cell(cell) }}</td>
+        {% else %}<td class="visit-cell empty" title="Переходы не планировались">—</td>{% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ pagination_bar(visits.pagination) }}
+{% else %}
+<section class="empty">
+  <h2>Данных о переходах пока нет</h2>
+  <p>Загрузите CSV-файл со статистикой переходов, чтобы увидеть таблицу.</p>
+</section>
+{% endif %}
+<section class="card import-card">
+  <h2>Загрузить статистику переходов</h2>
+  <p class="muted">CSV с разделителем «;» или «,»: дата (ГГГГ-ММ-ДД или ДД.ММ.ГГГГ); запрос; выполнено; запланировано; расход, ₽; глубина (необязательно). Строки с той же датой и запросом заменяются.</p>
+  <form method="post" action="{{ url_for('import_visits', project_id=project.id) }}" enctype="multipart/form-data" class="import-form">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="file" name="visits" accept=".csv,text/csv" required aria-label="CSV-файл с переходами">
+    <button class="button outline" type="submit">Загрузить</button>
+  </form>
+</section>

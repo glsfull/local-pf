@@ -1,0 +1,29 @@
+<div class="summary-cards">
+  <div class="summary-card"><span class="muted">Расход за период</span><b>{{ expense_totals.cost|metric(' ₽') }}</b></div>
+  <div class="summary-card"><span class="muted">Переходов выполнено</span><b>{{ expense_totals.done }}/{{ expense_totals.planned }}</b></div>
+  <div class="summary-card"><span class="muted">Дневной бюджет</span><b>{{ settings.daily_budget|metric(' ₽') if settings.limit_budget else 'Без ограничения' }}</b></div>
+  <div class="summary-card"><span class="muted">Фактический расход</span><b>{{ project.spent|metric(' ₽') }}</b></div>
+</div>
+{% if expense_rows %}
+<div class="table-scroll" tabindex="0" role="region" aria-label="Расходы по дням">
+  <table class="data-table">
+    <thead><tr><th>Дата</th><th>Переходов выполнено</th><th>Запланировано</th><th>Расход</th></tr></thead>
+    <tbody>
+      {% for row in expense_rows %}
+      <tr class="{{ 'over-budget' if row.over }}">
+        <th scope="row"><time datetime="{{ row.day }}">{{ row.day[8:10] }}.{{ row.day[5:7] }}.{{ row.day[:4] }}</time></th>
+        <td>{{ row.done }}</td>
+        <td>{{ row.planned }}</td>
+        <td>{{ row.cost|metric(' ₽') }}{% if row.over %} <span class="delta down" title="Больше дневного бюджета">⚠</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th scope="row">Итого</th><td>{{ expense_totals.done }}</td><td>{{ expense_totals.planned }}</td><td>{{ expense_totals.cost|metric(' ₽') }}</td></tr></tfoot>
+  </table>
+</div>
+{% else %}
+<section class="empty">
+  <h2>Расходов пока нет</h2>
+  <p>Расходы появятся после загрузки статистики переходов на вкладке «Переходы».</p>
+</section>
+{% endif %}

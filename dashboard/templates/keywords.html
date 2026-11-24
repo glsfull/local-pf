@@ -1,38 +1,117 @@
-<section class="panel">
-  <header class="panel-header"><h2>Ключевики</h2></header>
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Настроенные фразы">
-    <table>
-      <thead><tr>
-        <th>Ключевик</th><th>Позиция</th><th>Шанс топа</th><th>IW</th><th>Спрос</th><th>Мощность</th>
-        <th>Переходы в день</th><th>Конкуренция</th><th>Бюджет в день</th>
-      </tr></thead>
-      <tbody>
-        {% for word in keywords %}
-        {% set sample = latest.get((word.phrase, word.landing_url)) %}
-        <tr>
-          <th scope="row">
-            {{ word.phrase }}
-            {% if word.landing_url %}<small class="secondary-line">{{ word.landing_url }}</small>{% endif %}
-            <small class="secondary-line">{{ 'Бренд · ' ~ word.brand if word.hint_type == 'brand' else 'Домен · ' ~ domain }}</small>
-          </th>
-          <td>
-            {% if not sample %}—{% elif sample.error %}<span class="state failed" title="{{ sample.error }}">Ошибка</span>
-            {% else %}<span class="position {{ sample.rank|rank_tier }}">{{ sample.rank or '51+' }}</span>{% endif %}
-          </td>
-          <td>{{ word.chance|metric('%') }}</td>
-          <td>{{ word.iw|metric }}</td>
-          <td>{{ '+' if word.demand and word.demand > 0 }}{{ word.demand|metric }}</td>
-          <td>{{ word.power|metric('%') }}</td>
-          <td>{{ word.visits|metric }}</td>
-          <td>
-            {% if word.competition %}
-            <span class="competition {{ word.competition }}">{{ competition_labels[word.competition] }}</span>
-            {% else %}—{% endif %}
-          </td>
-          <td>{{ word.budget|metric(' ₽') }}</td>
-        </tr>
+{% from 'partials/macros.html' import pagination_bar, info, notices_box %}
+{% macro sort_header(key, label, hint=none) %}
+{% set active = sort == key %}
+<a class="sort {{ 'active' if active }}" href="{{ url_for('project', project_id=project.id, view='keywords', **dict(request.args.to_dict(), sort=key, order='asc' if active and descending else 'desc', page=1)) }}">{{ label }}{% if active %} <span aria-hidden="true">{{ '↓' if descending else '↑' }}</span>{% endif %}</a>{% if hint %} {{ info(hint) }}{% endif %}
+{% endmacro %}
+<div class="toolbar">
+  <div class="toolbar-group">
+    <a class="button primary" href="{{ url_for('edit_project', project_id=project.id) }}#keywords-section">Добавить ключевики</a>
+    <details class="dropdown" data-dropdown>
+      <summary class="button outline">Настроить колонки <span class="chevron" aria-hidden="true"></span></summary>
+      <div class="dropdown-menu column-menu" data-column-menu="keywords-table">
+        {% for key, label in [('position', 'Позиция'), ('chance', 'Шанс топа'), ('iw', '"!W"'), ('demand', 'Спрос'), ('power', 'Мощность'), ('visits', 'Переходы в день'), ('queue', 'В очереди'), ('competition', 'Конкуренция'), ('budget', 'Бюджет в день')] %}
+        <label><input type="checkbox" data-column-toggle="{{ key }}" checked> {{ label }}</label>
         {% endfor %}
-      </tbody>
-    </table>
+      </div>
+    </details>
+    <form method="post" action="{{ url_for('auto_strategy', project_id=project.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}">
+      <button class="button outline" type="submit" title="Мощность по конкуренции: низкая 10%, средняя 20%, высокая 30%">Авто-стратегия</button>
+    </form>
+    <a class="button outline" href="{{ url_for('export', project_id=project.id, kind='keywords') }}">Экспорт</a>
   </div>
-</section>
+</div>
+{{ notices_box(notices) }}
+<form method="get" class="filters" data-autosubmit>
+  {% for key in ('sort', 'order', 'per_page') if request.args.get(key) %}<input type="hidden" name="{{ key }}" value="{{ request.args.get(key) }}">{% endfor %}
+  <label><span class="visually-hidden">Фильтр ключевиков</span>
+    <select name="filter">
+      {% for key, label in filters.items() %}<option value="{{ key }}" {% if key == filter %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <noscript><button class="button small" type="submit">Применить</button></noscript>
+</form>
+<div class="keyword-forms" hidden>
+  {% for row in rows %}
+  <form id="keyword-{{ row.word.ordinal }}" method="post" action="{{ url_for('edit_keyword', project_id=project.id, ordinal=row.word.ordinal) }}">
+    <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}">
+  </form>
+  {% endfor %}
+</div>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Ключевики проекта">
+  <table class="data-table keywords-table" id="keywords-table">
+    <thead><tr>
+      <th class="check-col"><input type="checkbox" aria-label="Выбрать все ключевики" data-check-all></th>
+      <th>Ключевик</th>
+      <th data-column="position">{{ sort_header('position', 'Позиция') }}</th>
+      <th data-column="chance">{{ sort_header('chance', 'Шанс топа', 'Вероятность вывести запрос в топ-10 поведенческими факторами') }}</th>
+      <th data-column="iw">{{ sort_header('iw', '"!W"', 'Точная частотность запроса') }}</th>
+      <th data-column="demand">{{ sort_header('demand', 'Спрос', 'Изменение спроса за месяц') }}</th>
+      <th data-column="power">Мощность {{ info('Доля переходов от частотности запроса') }}</th>
+      <th data-column="visits">Переходы в день</th>
+      <th data-column="queue">В очереди</th>
+      <th data-column="competition">Конкуренция</th>
+      <th data-column="budget">{{ sort_header('budget', 'Бюджет в день') }}</th>
+    </tr></thead>
+    <tbody>
+      {% for row in rows %}
+      {% set word = row.word %}
+      {% set form_id = 'keyword-' ~ word.ordinal %}
+      <tr>
+        <td class="check-col"><input type="checkbox" aria-label="Выбрать {{ word.phrase }}" data-check></td>
+        <th scope="row" class="phrase-cell">
+          {{ word.phrase }}
+          {% if word.landing_url %}<small class="secondary-line">{{ word.landing_url }}</small>{% endif %}
+          <small class="secondary-line">{{ 'Бренд · ' ~ word.brand if word.hint_type == 'brand' else 'Домен · ' ~ domain }}</small>
+        </th>
+        <td data-column="position">
+          {% if not row.sample %}<span class="muted">—</span>
+          {% elif row.sample.error %}<span class="pos-badge error" title="{{ row.sample.error }}">Ошибка</span>
+          {% else %}<span class="pos-badge {{ row.sample.rank|position_class }}">{{ row.sample.rank or '51+' }}</span>{% endif %}
+        </td>
+        <td data-column="chance">{{ word.chance|metric('%') }}</td>
+        <td data-column="iw">{{ word.iw|metric }}</td>
+        <td data-column="demand">{% if word.demand %}<span class="delta {{ 'up' if word.demand > 0 else 'down' }}">{{ word.demand|signed }}</span>{% else %}{{ word.demand|metric }}{% endif %}</td>
+        <td data-column="power">
+          <span class="inline-edit">
+            <span class="input-suffix"><input form="{{ form_id }}" name="power" inputmode="decimal" size="3" value="{{ (word.power if word.power is not none else 10)|metric }}" aria-label="Мощность для {{ word.phrase }}, %"><span aria-hidden="true">%</span></span>
+            <button class="icon-button" form="{{ form_id }}" name="auto" value="1" type="submit" title="Подобрать мощность автоматически" aria-label="Подобрать мощность автоматически">🪄</button>
+          </span>
+        </td>
+        <td data-column="visits">
+          <span class="inline-edit">
+            <input form="{{ form_id }}" name="visits" inputmode="numeric" size="4" value="{{ word.visits if word.visits is not none else '' }}" placeholder="—" aria-label="Переходы в день для {{ word.phrase }}">
+            <button class="icon-button" form="{{ form_id }}" type="submit" title="Сохранить" aria-label="Сохранить переходы">✎</button>
+          </span>
+        </td>
+        <td data-column="queue">{{ row.queue }}</td>
+        <td data-column="competition">
+          {% if word.competition %}
+          <span class="flames" title="{{ competition_labels[word.competition] }}">{% for index in range(3) %}<span class="flame {{ 'on' if index < row.flames }}" aria-hidden="true">🔥</span>{% endfor %}<span class="visually-hidden">{{ competition_labels[word.competition] }}</span></span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td data-column="budget">{{ word.budget|metric(' ₽') }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="empty-row">Нет ключевиков для выбранного фильтра.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      {% for label, totals in [('На странице', page_totals), ('Всего', all_totals)] %}
+      <tr>
+        <td></td><th scope="row">{{ label }}</th><td data-column="position"></td><td data-column="chance"></td>
+        <td data-column="iw">{{ totals.iw|metric }}</td>
+        <td data-column="demand">{{ totals.demand|signed }}</td>
+        <td data-column="power"></td>
+        <td data-column="visits">{{ totals.visits|metric }}</td>
+        <td data-column="queue">{{ totals.queue|metric }}</td>
+        <td data-column="competition"></td>
+        <td data-column="budget">{{ totals.budget|metric(' ₽') }}</td>
+      </tr>
+      {% endfor %}
+    </tfoot>
+  </table>
+</div>
+{{ pagination_bar(pagination) }}

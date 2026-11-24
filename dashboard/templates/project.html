@@ -1,119 +1,25 @@
 {% extends "base.html" %}
-{% macro rank_badge(rank, checked_at, error) %}
-  {% if rank %}<span class="rank {% if rank <= 10 %}top{% endif %}">{{ rank }}</span>
-  {% elif checked_at and not error %}<span class="rank outside">Вне топ‑50</span>
-  {% else %}<span class="muted">—</span>{% endif %}
-{% endmacro %}
-{% macro query_status(rank, checked_at, error) %}
-  {% if error %}<span class="state failed">Ошибка</span>
-  {% elif rank %}<span class="state complete">OK</span>
-  {% elif checked_at %}<span class="state">NOT_FOUND</span>
-  {% else %}<span class="muted">—</span>{% endif %}
-{% endmacro %}
-{% macro field_value(value) %}{{ '' if value is none or value is undefined else value }}{% endmacro %}
 {% block title %}{{ project.name }}{% endblock %}
+{% block head %}{% if view == 'positions' %}<script defer src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}"></script>{% endif %}{% endblock %}
+{% block subheader %}{% with status_project=project %}{% include 'partials/project_header.html' %}{% endwith %}{% endblock %}
+{% block main_class %}page project-page{% endblock %}
 {% block content %}
-<a class="breadcrumb" href="{{ url_for('projects') }}">← К проектам</a>
-<header class="page-header">
-  <div>
-    <h1>{{ project.name }}</h1>
-    <p>{{ project.url }}</p>
-  </div>
-  <div class="actions">
-    <a class="button" href="{{ url_for('edit_project', project_id=project.id) }}">Редактировать</a>
-    <form method="post" action="{{ url_for('new_run', project_id=project.id) }}">
-      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-      <button class="button primary" {% if not configured or active %}disabled{% endif %}>Снять позиции</button>
-    </form>
-  </div>
-</header>
-<div class="project-meta">
-  <span>{{ keywords|length }} <small>фраз</small></span>
-  <span>{{ project.interval_seconds }} с <small>между фразами</small></span>
-  <span>{{ project.region_name or project.region or 'По умолчанию' }} <small>регион</small></span>
-</div>
-<nav class="project-tabs" aria-label="Разделы проекта">
-  {% for key, label in [('keywords', 'Ключевики'), ('clusters', 'Кластеры'), ('positions', 'Позиции')] %}
-  <a href="{{ url_for('project', project_id=project.id, view=key) if key != 'positions' else url_for('project', project_id=project.id) }}"
-     {% if view == key %}aria-current="page"{% endif %}>{{ label }}</a>
-  {% endfor %}
-</nav>
 {% if not configured %}
-<p class="notice">Для запуска подключите браузерный агент. <a href="{{ url_for('settings') }}">Настройки подключения</a></p>
+<p class="alert warning">Для сбора позиций подключите браузерный агент. <a href="{{ url_for('settings') }}">Настройки подключения</a></p>
 {% elif active %}
-<p class="notice" role="status" data-poll>{{ 'Идёт проверка проекта.' if active.project_id == project.id else 'Выполняется проверка другого проекта.' }} Страница обновится автоматически.</p>
+<p class="alert info" role="status" data-poll>{{ 'Идёт сбор позиций проекта.' if active.project_id == project.id else 'Выполняется проверка другого проекта.' }} Страница обновится автоматически.</p>
 {% endif %}
 {% if view == 'keywords' %}
 {% include 'keywords.html' %}
 {% elif view == 'clusters' %}
 {% include 'clusters.html' %}
+{% elif view == 'visits' %}
+{% include 'visits.html' %}
+{% elif view == 'schedule' %}
+{% include 'schedule.html' %}
+{% elif view == 'expenses' %}
+{% include 'expenses.html' %}
 {% else %}
 {% include 'position_history.html' %}
-{% if run %}
-<section class="panel">
-  <header class="panel-header">
-    <div>
-      <h2>Детали проверки</h2>
-      <p>{{ run.source }} · {{ run.started_at|display_date }}{% if run.region %} · Регион {{ run.region }}{% endif %} · <span class="state {{ run.state }}">{{ states[run.state] }}</span></p>
-      {% if run.project_url != project.url %}<p>{{ run.project_url }}</p>{% endif %}
-      {% if has_report %}<p><a href="{{ url_for('run_logs', project_id=project.id, run_id=run.id) }}">Журнал проверки</a></p>{% endif %}
-    </div>
-    {% if runs|length > 1 %}
-    <details class="history">
-      <summary class="button">История</summary>
-      <div class="history-list">
-      {% for previous in runs %}
-        <a href="{{ url_for('project', project_id=project.id, run_id=previous.id) }}"
-           {% if previous.id == run.id %}aria-current="true"{% endif %}>
-          №{{ previous.id }} · {{ previous.started_at|display_date }} · {{ states[previous.state] }}
-        </a>
-      {% endfor %}
-      </div>
-    </details>
-    {% endif %}
-  </header>
-  {% if run.error %}<p class="notice failure inset" role="alert">{{ run.error }}</p>{% endif %}
-  <div class="table-scroll" tabindex="0" role="region" aria-label="Позиции по фразам">
-    <table>
-      <thead><tr><th>Ключевая фраза</th><th>Позиция без подсказки</th><th>Уточнённый запрос</th><th>Позиция с подсказкой</th><th>URL найденной страницы</th><th>Дата и время (МСК)</th><th>Статус</th></tr></thead>
-      <tbody>
-        {% for row in measurements %}
-        <tr>
-          <th scope="row">{{ row.phrase }}</th>
-          <td>{{ rank_badge(row.rank, row.checked_at, row.error) }}</td>
-          <td class="query-cell">{{ row.hint_query if row.checked_at and not row.rank and not row.error else '—' }}</td>
-          <td>{{ rank_badge(row.hint_rank, row.hinted_at, row.hint_error) }}</td>
-          <td class="url-cell">
-            {{ row.found_url or '—' }}
-            {% if row.hinted_at %}<small class="secondary-line">С подсказкой</small>{{ row.hint_found_url or '—' }}{% endif %}
-            {% if row.landing_url and not (row.found_url or row.hint_found_url) %}
-            <small class="secondary-line">Задан {{ row.landing_url }}</small>
-            {% endif %}
-          </td>
-          <td class="time-cell">
-            {{ row.checked_at|display_date }}
-            {% if row.hinted_at %}<small class="secondary-line">С подсказкой</small>{{ row.hinted_at|display_date }}{% endif %}
-          </td>
-          <td class="status-cell">
-            {{ query_status(row.rank, row.checked_at, row.error) }}
-            {% if row.hinted_at %}
-            <small class="secondary-line">С подсказкой</small>
-            {{ query_status(row.hint_rank, row.hinted_at, row.hint_error) }}
-            {% endif %}
-            {% if row.error %}<small class="secondary-line">{{ row.error }}</small>{% endif %}
-            {% if row.hint_error %}<small class="secondary-line">С подсказкой · {{ row.hint_error }}</small>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% else %}
-<section class="panel empty">
-  <h2>Позиций пока нет</h2>
-  <p>Запустите проверку, чтобы добавить измерения в историю.</p>
-</section>
-{% endif %}
 {% endif %}
 {% endblock %}

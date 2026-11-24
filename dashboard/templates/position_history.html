@@ -1,81 +1,169 @@
+{% from 'partials/macros.html' import pagination_bar, period_filters %}
+{% macro rank_badge(rank, checked_at, error) %}
+  {% if rank %}<span class="pos-badge {{ rank|position_class }}">{{ rank }}</span>
+  {% elif checked_at and not error %}<span class="pos-badge outside">Вне топ‑50</span>
+  {% else %}<span class="muted">—</span>{% endif %}
+{% endmacro %}
+{% macro query_status(rank, checked_at, error) %}
+  {% if error %}<span class="state failed">Ошибка</span>
+  {% elif rank %}<span class="state complete">OK</span>
+  {% elif checked_at %}<span class="state">NOT_FOUND</span>
+  {% else %}<span class="muted">—</span>{% endif %}
+{% endmacro %}
+<div class="toolbar">
+  <div class="toolbar-group">
+    <span class="badge-muted" title="Время ежедневного автоматического сбора, МСК">{% if settings.collect_daily %}Собираются в {{ settings.collect_time }}{% else %}Автосбор выключен{% endif %}</span>
+    <button class="link-action" type="button" data-copy-link title="Скопировать ссылку на эту страницу"><span aria-hidden="true">🔗</span> Гостевая ссылка</button>
+  </div>
+  <div class="toolbar-group">
+    <form method="post" action="{{ url_for('new_run', project_id=project.id) }}">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="button primary" {% if not configured or active or low_balance %}disabled{% endif %}>Собрать позиции</button>
+    </form>
+  </div>
+</div>
+{% if low_balance %}
+<p class="alert error" role="alert">На балансе недостаточно средств. Сбор позиций приостановлен.</p>
+{% endif %}
+{% call period_filters(project, 'positions', period, since, until) %}
+  <div class="segmented" role="group" aria-label="Источник позиций">
+    <span aria-current="true">Лайв-выдача</span>
+    <span class="disabled" title="Позиции из Вебмастера пока не подключены">Вебмастер</span>
+  </div>
+  <a class="button outline small push-right" href="{{ url_for('export', project_id=project.id, kind='positions') }}">Экспортировать</a>
+{% endcall %}
 {% if days %}
-<section class="panel visibility">
-  <header class="panel-header">
-    <div>
-      <h2>Видимость по датам</h2>
-      <p>Категории позиций среди проверенных фраз, МСК</p>
-    </div>
+<section class="card visibility">
+  <header class="card-header">
+    <ul class="chart-legend" aria-label="Обозначения графика">
+      <li><span class="legend-line visibility-line"></span>Видимость</li>
+      <li><span class="legend-line top10-line"></span>Топ 1-10</li>
+      {% for tier, label in tiers.items() %}<li><span class="legend-box {{ tier }}"></span>{{ label }}</li>{% endfor %}
+    </ul>
     <div class="segmented" aria-label="Тип запроса для графика">
       {% for hinted, label in [(false, 'Исходные'), (true, 'С подсказкой')] %}
-      <a href="{{ url_for('project', project_id=project.id, run_id=run.id if run else none, query='hint' if hinted else none) }}"
+      <a href="{{ url_for('project', project_id=project.id, run_id=run.id if run and request.view_args.run_id else none, query='hint' if hinted else none, period=request.args.get('period'), **{'from': request.args.get('from'), 'to': request.args.get('to')}) }}"
          {% if hinted == hinted_chart %}aria-current="true"{% endif %}>{{ label }}</a>
       {% endfor %}
     </div>
   </header>
-  <div class="chart-body">
-    <div class="chart-controls">
-      <ul class="chart-legend" aria-label="Диапазоны позиций">
-        {% for tier, label in tiers.items() %}<li><span class="{{ tier }}"></span>{{ label }}</li>{% endfor %}
-      </ul>
-      <div class="segmented" data-chart-modes hidden aria-label="Единицы видимости">
-        <button type="button" data-chart-mode="percent" aria-pressed="true">Доля, %</button>
-        <button type="button" data-chart-mode="count" aria-pressed="false">Количество</button>
-      </div>
-    </div>
-    {% if chart|sum(attribute='total') %}
-    <div class="chart-scroll">
-      <canvas id="visibility-chart" aria-label="Распределение позиций по датам. Значения доступны в таблице графика." role="img"></canvas>
-    </div>
-    <details class="chart-data">
-      <summary>Данные графика</summary>
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Значения видимости">
-        <table id="visibility-data">
-          <thead><tr><th>Дата (МСК)</th><th>Проверено</th>{% for label in tiers.values() %}<th>{{ label }}</th>{% endfor %}</tr></thead>
-          <tbody>
-            {% for point in chart %}
-            <tr data-day="{{ point.day.strftime('%d.%m') }}">
-              <th scope="row">{{ point.day.strftime('%d.%m.%Y') }}</th>
-              <td>{{ point.total }}</td>
-              {% for value in point.counts %}
-              <td data-count="{{ value }}">{{ value }} · {{ (value * 100 / point.total if point.total else none)|metric('%') }}</td>
-              {% endfor %}
-            </tr>
+  {% if chart|sum(attribute='total') %}
+  <div class="chart-box">
+    <canvas id="visibility-chart" aria-label="Распределение позиций по датам. Значения доступны в таблице «Данные графика»." role="img"></canvas>
+  </div>
+  <details class="chart-data">
+    <summary>Данные графика</summary>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Значения видимости">
+      <table id="visibility-data" class="data-table compact">
+        <thead><tr><th>Дата (МСК)</th><th>Проверено</th>{% for label in tiers.values() %}<th>{{ label }}</th>{% endfor %}<th>Топ 1-10</th><th>Видимость</th></tr></thead>
+        <tbody>
+          {% for point in chart %}
+          <tr data-day="{{ point.day.strftime('%d.%m') }}" data-top10="{{ point.top10 if point.top10 is not none else '' }}" data-visibility="{{ point.visibility if point.visibility is not none else '' }}">
+            <th scope="row">{{ point.day.strftime('%d.%m.%Y') }}</th>
+            <td>{{ point.total }}</td>
+            {% for value in point.counts %}
+            <td data-count="{{ value }}">{{ value }} · {{ (value * 100 / point.total if point.total else none)|metric('%') }}</td>
             {% endfor %}
-          </tbody>
-        </table>
+            <td>{{ point.top10|metric('%') }}</td>
+            <td>{{ point.visibility|metric('%') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <p class="chart-empty muted">Пока нет измерений для этого типа запроса.</p>
+  {% endif %}
+</section>
+<div class="table-scroll matrix-scroll" tabindex="0" role="region" aria-label="История позиций по датам">
+  <table class="position-matrix">
+    <thead><tr>
+      <th class="sticky-1">Запрос</th><th class="sticky-2">"!W"</th><th class="sticky-3">Найденный URL</th>
+      {% for day in days %}<th scope="col" class="day-col"><time datetime="{{ day.isoformat() }}" title="{{ day.strftime('%d.%m.%Y') }} МСК">{{ day.strftime('%d.%m') }}</time></th>{% endfor %}
+    </tr></thead>
+    <tbody>
+      {% for line in history %}
+      <tr>
+        <th scope="row" class="sticky-1">
+          {{ line.query }}
+          {% if line.hinted %}<small class="secondary-line">С подсказкой · {{ line.phrase }}</small>{% endif %}
+          {% if line.landing_url %}<small class="secondary-line">{{ line.landing_url }}</small>{% endif %}
+        </th>
+        <td class="sticky-2">{{ line.iw|metric }}</td>
+        <td class="sticky-3 url-cell">{{ line.url or '—' }}</td>
+        {% for day in days %}
+        {% set sample = line.days.get(day) %}
+        {% if not sample %}<td class="matrix-cell" title="Проверка не проводилась">—</td>
+        {% elif sample.error %}<td class="matrix-cell measurement-error" title="{{ sample.at|display_date }} · {{ sample.error }}">Ошибка</td>
+        {% else %}<td class="matrix-cell {{ sample.rank|position_class }}" title="{{ sample.at|display_date }}{% if sample.url %} · {{ sample.url }}{% endif %}">{{ sample.rank or '51+' }}</td>{% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{{ pagination_bar(pagination) }}
+{% else %}
+<section class="empty">
+  <h2>Позиций пока нет</h2>
+  <p>Запустите сбор позиций, чтобы добавить измерения в историю.</p>
+</section>
+{% endif %}
+{% if run %}
+<section class="card run-details">
+  <header class="card-header">
+    <div>
+      <h2>Детали проверки</h2>
+      <p class="muted">{{ run.source }} · {{ run.started_at|display_date }}{% if run.region %} · Регион {{ run.region }}{% endif %} · <span class="state {{ run.state }}">{{ states[run.state] }}</span></p>
+      {% if run.project_url != project.url %}<p class="muted">{{ run.project_url }}</p>{% endif %}
+      {% if has_report %}<p><a href="{{ url_for('run_logs', project_id=project.id, run_id=run.id) }}">Журнал проверки</a></p>{% endif %}
+    </div>
+    {% if runs|length > 1 %}
+    <details class="dropdown align-end" data-dropdown>
+      <summary class="button outline small">История <span class="chevron" aria-hidden="true"></span></summary>
+      <div class="dropdown-menu history-list">
+      {% for previous in runs %}
+        <a href="{{ url_for('project', project_id=project.id, run_id=previous.id) }}"
+           {% if previous.id == run.id %}aria-current="true"{% endif %}>
+          №{{ previous.id }} · {{ previous.started_at|display_date }} · {{ states[previous.state] }}
+        </a>
+      {% endfor %}
       </div>
     </details>
-    {% else %}
-    <p class="chart-empty muted">Пока нет измерений для этого типа запроса.</p>
     {% endif %}
-  </div>
-</section>
-<section class="panel">
-  <header class="panel-header">
-    <div><h2>История позиций</h2><p>Последнее измерение за день, до 30 дат</p></div>
   </header>
-  <div class="table-scroll" tabindex="0" role="region" aria-label="История позиций по датам">
-    <table class="position-matrix">
-      <thead><tr>
-        <th>Запрос</th><th>IW</th><th>Найденный URL</th>
-        {% for day in days %}<th scope="col"><time datetime="{{ day.isoformat() }}" title="{{ day.strftime('%d.%m.%Y') }} МСК">{{ day.strftime('%d.%m') }}</time></th>{% endfor %}
-      </tr></thead>
+  {% if run.error %}<p class="alert error" role="alert">{{ run.error }}</p>{% endif %}
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Позиции по фразам">
+    <table class="data-table">
+      <thead><tr><th>Ключевая фраза</th><th>Позиция без подсказки</th><th>Уточнённый запрос</th><th>Позиция с подсказкой</th><th>URL найденной страницы</th><th>Дата и время (МСК)</th><th>Статус</th></tr></thead>
       <tbody>
-        {% for line in history %}
+        {% for row in measurements %}
         <tr>
-          <th scope="row">
-            {{ line.query }}
-            {% if line.hinted %}<small class="secondary-line">С подсказкой · {{ line.phrase }}</small>{% endif %}
-            {% if line.landing_url %}<small class="secondary-line">{{ line.landing_url }}</small>{% endif %}
-          </th>
-          <td>{{ line.iw|metric }}</td>
-          <td class="url-cell">{{ line.url or '—' }}</td>
-          {% for day in days %}
-          {% set sample = line.days.get(day) %}
-          {% if not sample %}<td class="matrix-cell" title="Проверка не проводилась">—</td>
-          {% elif sample.error %}<td class="matrix-cell measurement-error" title="{{ sample.at|display_date }} · {{ sample.error }}">Ошибка</td>
-          {% else %}<td class="matrix-cell {{ sample.rank|rank_tier }}" title="{{ sample.at|display_date }}{% if sample.url %} · {{ sample.url }}{% endif %}">{{ sample.rank or '51+' }}</td>{% endif %}
-          {% endfor %}
+          <th scope="row">{{ row.phrase }}</th>
+          <td>{{ rank_badge(row.rank, row.checked_at, row.error) }}</td>
+          <td class="query-cell">{{ row.hint_query if row.checked_at and not row.rank and not row.error else '—' }}</td>
+          <td>{{ rank_badge(row.hint_rank, row.hinted_at, row.hint_error) }}</td>
+          <td class="url-cell">
+            {{ row.found_url or '—' }}
+            {% if row.hinted_at %}<small class="secondary-line">С подсказкой</small>{{ row.hint_found_url or '—' }}{% endif %}
+            {% if row.landing_url and not (row.found_url or row.hint_found_url) %}
+            <small class="secondary-line">Задан {{ row.landing_url }}</small>
+            {% endif %}
+          </td>
+          <td class="time-cell">
+            {{ row.checked_at|display_date }}
+            {% if row.hinted_at %}<small class="secondary-line">С подсказкой</small>{{ row.hinted_at|display_date }}{% endif %}
+          </td>
+          <td class="status-cell">
+            {{ query_status(row.rank, row.checked_at, row.error) }}
+            {% if row.hinted_at %}
+            <small class="secondary-line">С подсказкой</small>
+            {{ query_status(row.hint_rank, row.hinted_at, row.hint_error) }}
+            {% endif %}
+            {% if row.error %}<small class="secondary-line">{{ row.error }}</small>{% endif %}
+            {% if row.hint_error %}<small class="secondary-line">С подсказкой · {{ row.hint_error }}</small>{% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
