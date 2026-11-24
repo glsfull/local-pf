@@ -273,6 +273,60 @@ class PanelTest(unittest.TestCase):
             row = db.execute("SELECT state, error FROM runs WHERE id=?", (run_id,)).fetchone()
         self.assertEqual(tuple(row), ("failed", "CAPTCHA"))
 
+    def test_logs_show_captcha_history_and_operator_request(self):
+        report_path = Path(self.directory.name) / "report.json"
+        client = create_app(self.path, report_path=report_path).test_client()
+        captcha_url = "https://ya.ru/showcaptcha?retpath=x"
+        report_path.write_text(json.dumps({
+            "keyword": "Проверка", "timestamp": "2026-11-23T22:24:30+00:00",
+            "status": "CAPTCHA_MANUAL_REQUIRED", "captcha_encountered": True,
+            "events": [{
+                "operation": "Обнаружена капча", "url": captcha_url, "timestamp_msk": "2026-11-24T01:24:30+03:00",
+                "captcha_type": "checkbox", "status": "CAPTCHA",
+            }, {
+                "operation": "Попытка нажать чекбокс", "url": captcha_url,
+                "timestamp_msk": "2026-11-24T01:24:31+03:00", "captcha_type": "checkbox", "attempt": 3,
+                "status": "CAPTCHA",
+            }, {
+                "operation": "Ответ локальной модели", "url": captcha_url,
+                "timestamp_msk": "2026-11-24T01:24:32+03:00", "captcha_type": "image", "points": 0,
+                "screenshot": "/app/logs/captcha/captcha-1a2b3c4d.png", "status": "CAPTCHA",
+            }, {
+                "operation": "Капча не решена, ожидание оператора", "url": captcha_url,
+                "timestamp_msk": "2026-11-24T01:24:33+03:00", "captcha_type": "complex",
+                "status": "CAPTCHA_MANUAL_REQUIRED", "message": "CAPTCHA_MANUAL_REQUIRED: Требуется участие оператора.",
+                "operator_url": "http://localhost:56565", "timeout_seconds": 300,
+            }],
+            "captcha": {"attempts": 3, "history": [
+                {"event": "detected", "captcha_type": "checkbox", "url": captcha_url,
+                 "timestamp_msk": "2026-11-24T01:24:30+03:00"},
+                {"event": "attempt", "captcha_type": "checkbox", "attempt": 1,
+                 "timestamp_msk": "2026-11-24T01:24:31+03:00"},
+                {"event": "manual_required", "captcha_type": "complex", "timeout_seconds": 300,
+                 "timestamp_msk": "2026-11-24T01:24:33+03:00"},
+            ]},
+        }), encoding="utf-8")
+        html = client.get("/logs").get_data(as_text=True)
+        for content in (
+            "CAPTCHA_MANUAL_REQUIRED: Требуется участие оператора.", 'href="http://localhost:56565"',
+            "Автоматических попыток", "Решается", "Чекбокс «Я не робот»", "Сложная, ввод текста",
+            "Капча не решена, ожидание оператора", "Попытка 3", "Точек от модели 0",
+            "Скриншот captcha-1a2b3c4d.png", "Лимит ожидания 300 с", "Автоматическая попытка",
+            "Агент проверяет её каждые несколько секунд",
+        ):
+            self.assertIn(content, html)
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+        data["status"] = "OK"
+        data["captcha"]["resolution"] = "operator"
+        data["captcha"]["history"].append({
+            "event": "operator_solved", "waited_seconds": 42.5, "timestamp_msk": "2026-11-24T01:25:15+03:00",
+        })
+        report_path.write_text(json.dumps(data), encoding="utf-8")
+        html = client.get("/logs").get_data(as_text=True)
+        self.assertNotIn("Агент проверяет её каждые несколько секунд", html)
+        for content in ("Решена оператором", "Оператор решил капчу, продолжаем", "Оператор решил за 42.5 с"):
+            self.assertIn(content, html)
+
     def test_legacy_positions_keep_ranks_and_show_moscow_dates(self):
         legacy_path = Path(self.directory.name) / "legacy.sqlite3"
         prefix, separator, measurements = SCHEMA.partition("CREATE TABLE IF NOT EXISTS measurements")

@@ -3,6 +3,18 @@
   {% if position %}scrollY={{ position.scrollY }} / scrollHeight={{ position.scrollHeight }} ({{ position.percent }}%)
   {% else %}—{% endif %}
 {% endmacro %}
+{% set captcha_types = {
+  'checkbox': 'Чекбокс «Я не робот»', 'image': 'Задание с картинками', 'complex': 'Сложная, ввод текста',
+  'unknown': 'Не распознана',
+} %}
+{% set captcha_steps = {
+  'detected': 'Обнаружена капча', 'attempt': 'Автоматическая попытка', 'solved': 'Капча решена автоматически',
+  'manual_required': 'Капча не решена, ожидание оператора', 'operator_solved': 'Оператор решил капчу, продолжаем',
+  'timeout': 'Время ожидания оператора истекло',
+} %}
+{% set resolutions = {
+  'automatic': 'Решена автоматически', 'operator': 'Решена оператором', 'timeout': 'Время ожидания истекло',
+} %}
 {% block title %}Логи агента{% endblock %}
 {% block content %}
 {% if project_id %}
@@ -20,6 +32,47 @@
 <div class="panel empty"><p>Отчёт появится после завершения проверки агентом.</p></div>
 {% else %}
 {% if report.error %}<p class="notice failure" role="alert">{{ report.error }}</p>{% endif %}
+{% if report.status == 'CAPTCHA_MANUAL_REQUIRED' %}
+{% set waiting = report.events|selectattr('operator_url', 'defined')|map(attribute='operator_url')|list %}
+{% set operator_url = waiting[-1] if waiting else 'http://localhost:56565' %}
+<p class="notice failure" role="alert">
+  CAPTCHA_MANUAL_REQUIRED: Требуется участие оператора. Откройте
+  <a href="{{ operator_url }}" target="_blank" rel="noopener">{{ operator_url }}</a>
+  и решите капчу. Агент проверяет её каждые несколько секунд и продолжит сам.
+</p>
+{% endif %}
+{% if report.captcha %}
+<section class="panel">
+  <header class="panel-header">
+    <h2>Капча</h2>
+    <div class="project-meta">
+      <span><small>Автоматических попыток</small>{{ report.captcha.attempts }}</span>
+      <span><small>Итог</small>{{ resolutions.get(report.captcha.resolution, 'Решается') }}</span>
+      {% if report.status %}<span><small>Статус отчёта</small>{{ report.status }}</span>{% endif %}
+    </div>
+  </header>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="История капчи">
+    <table>
+      <thead><tr><th>Дата и время (МСК)</th><th>Этап</th><th>Тип капчи</th><th>Попытка</th><th>Детали</th></tr></thead>
+      <tbody>
+        {% for item in report.captcha.history %}
+        <tr>
+          <td class="time-cell">{{ item.timestamp_msk|display_date }}</td>
+          <th scope="row">{{ captcha_steps.get(item.event, item.event) }}</th>
+          <td>{{ captcha_types.get(item.captcha_type, item.captcha_type or '—') }}</td>
+          <td>{{ item.attempt or '—' }}</td>
+          <td class="detail-cell">
+            {% if item.url %}<span class="url-cell">{{ item.url }}</span>{% endif %}
+            {% if item.waited_seconds is defined %}<span>Оператор решил за {{ item.waited_seconds }} с</span>{% endif %}
+            {% if item.timeout_seconds is defined %}<span>Лимит ожидания {{ item.timeout_seconds }} с</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 {% if report.pages_checked %}
 <section class="panel">
   <header class="panel-header"><h2>Проверенные страницы</h2></header>
@@ -56,7 +109,17 @@
           <td class="detail-cell">
             {% if event.destination %}<span>{{ event.destination }}</span>{% endif %}
             {% if event.target %}<span>Цель {{ event.target }}</span>{% endif %}
-            {% if event.query %}<span>{{ event.query }} · стр. {{ event.page }}</span>{% endif %}
+            {% if event.query %}<span>{{ event.query }}{% if event.page %} · стр. {{ event.page }}{% endif %}</span>{% endif %}
+            {% if event.captcha_type %}<span>Капча: {{ captcha_types.get(event.captcha_type, event.captcha_type) }}{% if event.captcha_kind %} ({{ event.captcha_kind }}){% endif %}</span>{% endif %}
+            {% if event.attempt %}<span>Попытка {{ event.attempt }}</span>{% endif %}
+            {% if event.message %}<span>{{ event.message }}</span>{% endif %}
+            {% if event.operator_url %}<span>noVNC: <a href="{{ event.operator_url }}" target="_blank" rel="noopener">{{ event.operator_url }}</a></span>{% endif %}
+            {% if event.screenshot %}<span>Скриншот {{ event.screenshot.rsplit('/', 1)[-1] }}</span>{% endif %}
+            {% if event.points is defined %}<span>Точек от модели {{ event.points }}</span>{% endif %}
+            {% if event.waited_seconds is defined %}<span>Ожидание оператора {{ event.waited_seconds }} с</span>{% endif %}
+            {% if event.timeout_seconds is defined %}<span>Лимит ожидания {{ event.timeout_seconds }} с</span>{% endif %}
+            {% if event.operation_id %}<span>Операция API {{ event.operation_id }}</span>{% endif %}
+            {% if event.poll_seconds %}<span>Опрос раз в {{ event.poll_seconds }} с</span>{% endif %}
             {% if event.result_count is defined %}<span>Найдено результатов {{ event.result_count }}</span>{% endif %}
             {% if event.selector %}<code>{{ event.selector }}</code>{% endif %}
             {% if event.found is defined %}<span>{{ 'Найден' if event.found else 'Не найден' }}</span>{% endif %}
