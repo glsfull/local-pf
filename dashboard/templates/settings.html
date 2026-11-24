@@ -7,6 +7,7 @@
     <a class="back-link" href="{{ url_for('projects') }}"><span aria-hidden="true">↺</span> Вернуться к списку проектов</a>
   </header>
   {% if error %}<p class="alert error" role="alert">{{ error }}</p>{% endif %}
+  {% if notice %}<p class="alert info" role="status">{{ notice }}</p>{% endif %}
   <form method="post" class="card form-card stack">
     <input type="hidden" name="csrf" value="{{ csrf_token() }}">
     <div class="field">
@@ -43,6 +44,21 @@
         {% if env_folder and not values.yandex_folder_id %}<p class="hint">Используется YANDEX_FOLDER_ID из .env.</p>{% endif %}
       </div>
     </fieldset>
+    <fieldset class="settings-group stack" id="deepseek">
+      <legend>ИИ · DeepSeek — сбор семантического ядра</legend>
+      <div class="field">
+        <label class="field-label" for="deepseek-api-key">DEEPSEEK_API_KEY</label>
+        <input id="deepseek-api-key" name="deepseek_api_key" type="password" autocomplete="off" maxlength="200" placeholder="{{ 'Оставьте пустым, чтобы не менять ключ' if has_deepseek_key else 'sk-…' }}">
+        <p class="hint" id="deepseek-key-state">{{ deepseek_state }} Ключ создаётся на <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com</a>; сбор ядра — вкладка проекта «Сбор ядра (ИИ)».</p>
+        {% if has_deepseek_key %}<label class="check-label"><input type="checkbox" name="clear_deepseek_key" value="1"> Удалить сохранённый ключ DeepSeek</label>{% endif %}
+      </div>
+      <div class="field">
+        <label class="field-label" for="deepseek-model">Модель</label>
+        <input id="deepseek-model" name="deepseek_model" value="{{ values.deepseek_model }}" maxlength="64" list="deepseek-models">
+        <datalist id="deepseek-models">{% for model in deepseek_models %}<option value="{{ model }}">{% endfor %}</datalist>
+        <p class="hint">{{ deepseek_models|join(' — быстрая и дешёвая, ') }} — точнее. Можно указать другую модель из документации DeepSeek.</p>
+      </div>
+    </fieldset>
     <fieldset class="settings-group stack">
       <legend>Агент в контейнере dp-agent</legend>
       <div class="field">
@@ -53,14 +69,96 @@
     </fieldset>
     <div><button class="button primary" type="submit">Сохранить</button></div>
   </form>
+  <section class="card form-card stack" id="profiles">
+    <h2>Профили Яндекса · {{ profiles|length }}</h2>
+    <p class="hint">Одна поисковая фраза — один профиль и один прокси: основной запрос и уточнение с брендом или доменом идут с одной парой, следующая фраза после интервала получает следующий профиль и следующий прокси (по кругу, сначала давно не использованные). Без профилей каждая фраза идёт с новым временным профилем Chromium.</p>
+    <form method="post" action="{{ url_for('add_profiles') }}" enctype="multipart/form-data" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="field">
+        <label class="field-label" for="profile-name">Название профиля</label>
+        <input id="profile-name" name="name" maxlength="100" placeholder="Например, yandex-01">
+      </div>
+      <div class="field">
+        <label class="field-label" for="profile-cookies">Cookies профиля (необязательно)</label>
+        <textarea id="profile-cookies" name="cookies" rows="3" placeholder='[{"name": "Session_id", "value": "…", "domain": ".yandex.ru"}]'></textarea>
+        <p class="hint">JSON-экспорт расширения Cookie-Editor или EditThisCookie. Cookies загружаются в профиль при первом запуске, дальше Chromium хранит их сам.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="profile-bulk">Массовая загрузка — по одному профилю в строке</label>
+        <textarea id="profile-bulk" name="bulk" rows="4" placeholder="yandex-01&#10;yandex-02;[{&quot;name&quot;: &quot;yandexuid&quot;, &quot;value&quot;: &quot;…&quot;, &quot;domain&quot;: &quot;.yandex.ru&quot;}]"></textarea>
+        <p class="hint">Строка — «название» или «название;cookies JSON». Пустые строки и строки с «#» пропускаются, повторы названий не добавляются.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="profile-files">Файлы</label>
+        <input id="profile-files" name="files" type="file" multiple accept=".json,.txt,.csv,application/json,text/plain">
+        <p class="hint">.json — один профиль с cookies, название берётся из имени файла; .txt — список в формате массовой загрузки. До {{ max_profiles }} профилей.</p>
+      </div>
+      <div><button class="button primary" type="submit">Добавить профили</button></div>
+    </form>
+    {% if profiles %}
+    <div class="table-scroll">
+      <table class="data-table compact">
+        <thead><tr><th>Профиль</th><th>Cookies</th><th>Поисков</th><th>Последний поиск</th><th></th></tr></thead>
+        <tbody>
+        {% for profile in profiles %}
+          <tr>
+            <th scope="row">{{ profile.name }}</th>
+            <td>{{ profile.cookies or '—' }}</td>
+            <td>{{ profile.uses }}</td>
+            <td>{{ profile.last_used_at|display_date if profile.last_used_at else '—' }}</td>
+            <td><form method="post" action="{{ url_for('delete_profile', profile_id=profile.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="button" type="submit" aria-label="Удалить профиль {{ profile.name }}">Удалить</button></form></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" action="{{ url_for('delete_profiles') }}" data-confirm="Удалить все профили и их данные Chromium?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="button" type="submit">Удалить все профили</button></form>
+    {% else %}
+    <p class="empty">Профили не добавлены.</p>
+    {% endif %}
+  </section>
+  <section class="card form-card stack" id="proxies">
+    <h2>Прокси · {{ proxies|length }}</h2>
+    <p class="hint">Каждая фраза идёт через следующий прокси списка. Без прокси агент работает с IP компьютера.</p>
+    <form method="post" action="{{ url_for('add_proxies') }}" enctype="multipart/form-data" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="field">
+        <label class="field-label" for="proxy-bulk">Прокси — по одному в строке</label>
+        <textarea id="proxy-bulk" name="bulk" rows="4" placeholder="http://login:password@203.0.113.10:8000&#10;socks5://203.0.113.11:1080&#10;203.0.113.12:3128:login:password"></textarea>
+        <p class="hint">Форматы: <code>scheme://login:password@host:port</code>, <code>host:port</code>, <code>host:port:login:password</code>, <code>login:password@host:port</code>; схемы http, https, socks4, socks5 (без схемы — http). Одна строка — ручное добавление, много строк — массовое.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="proxy-files">Файлы со списком прокси</label>
+        <input id="proxy-files" name="files" type="file" multiple accept=".txt,.csv,text/plain">
+        <p class="hint">До {{ max_proxies }} прокси. Пароли в панели не показываются.</p>
+      </div>
+      <div><button class="button primary" type="submit">Добавить прокси</button></div>
+    </form>
+    {% if proxies %}
+    <div class="table-scroll">
+      <table class="data-table compact">
+        <thead><tr><th>Прокси</th><th>Поисков</th><th>Последний поиск</th><th></th></tr></thead>
+        <tbody>
+        {% for proxy in proxies %}
+          <tr>
+            <th scope="row"><code>{{ proxy.masked }}</code></th>
+            <td>{{ proxy.uses }}</td>
+            <td>{{ proxy.last_used_at|display_date if proxy.last_used_at else '—' }}</td>
+            <td><form method="post" action="{{ url_for('delete_proxy', proxy_id=proxy.id) }}"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="button" type="submit" aria-label="Удалить прокси {{ proxy.masked }}">Удалить</button></form></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <form method="post" action="{{ url_for('delete_proxies') }}" data-confirm="Удалить все прокси?"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><button class="button" type="submit">Удалить все прокси</button></form>
+    {% else %}
+    <p class="empty">Прокси не добавлены.</p>
+    {% endif %}
+  </section>
   <section class="card connection">
     <h2>Настройки подключения · {{ source }}</h2>
-    {% if demo %}
-    <p>Панель использует локальный пример поисковой выдачи.</p>
-    {% else %}
     <p>Позиции снимаются через Yandex Search API без браузера и капчи; «🚀 Запустить агента» открывает Chromium в контейнере dp-agent.</p>
     <p>Держите <a href="{{ novnc_url }}" target="_blank" rel="noopener">noVNC</a> открытым во время работы агента.</p>
-    {% endif %}
   </section>
 </div>
 {% endblock %}

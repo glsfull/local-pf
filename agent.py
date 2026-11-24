@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from DrissionPage.errors import BrowserConnectError, PageDisconnectedError
 from filelock import Timeout
 
-from modules.browser import RunError, close_browser, open_browser
+from modules.browser import RunError, close_browser, open_browser, open_identity
 from modules.checker import check_pages
 from modules.clock import MoscowFormatter, timestamp
 from modules.config import read_config
@@ -109,7 +109,9 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
         "events": [],
     }
     with run_lock(path), TemporaryDirectory(prefix="local-pf-rank-") as profile:
-        source = RankParser(Journal(report["events"], delay), report, profile=profile)
+        source = RankParser(
+            Journal(report["events"], delay), report, profile=profile, identities=lambda: next_identity(path),
+        )
         with connect(path) as db:
             if project_id is not None:
                 db.execute("BEGIN IMMEDIATE")
@@ -130,11 +132,7 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
             state = execute_run(path, run_id, source, report=report)
             write_report(log_dir / "report.json", report)
         finally:
-            if source.browser is not None:
-                try:
-                    close_browser(source.browser)
-                except Exception:
-                    log.exception("Не удалось закрыть Chromium")
+            source.close()
     return 0 if state == "complete" else 1
 
 
@@ -146,7 +144,16 @@ def run_session(path, session_id):
         raise ValueError(f"База данных панели не найдена: {path}")
     session = AgentSession(path, session_id)
     with agent_lock(path), TemporaryDirectory(prefix="local-pf-agent-") as profile:
-        return session.execute(lambda: open_browser(15, profile=profile), close_browser)
+        return session.execute(lambda identity: open_identity(15, identity, profile=profile), close_browser)
+
+
+def next_identity(path):
+    """Least recently used Yandex profile and proxy from the panel settings."""
+    from dashboard import identities
+    from dashboard.storage import connect
+
+    with connect(path) as db:
+        return identities.take_identity(db, identities.profiles_root(path))
 
 
 def main():

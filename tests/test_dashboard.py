@@ -697,54 +697,38 @@ class TopPultInterfaceTest(DashboardCase):
             self.assertEqual(tuple(db.execute("SELECT power, visits FROM keyword_attributes WHERE ordinal = 0").fetchone()),
                              (None, 7))
 
-class DemoDataTest(unittest.TestCase):
-    def test_demo_seed_fills_every_project_tab(self):
-        from examples.dashboard_demo import demo_search, seed
+class FreshPanelTest(unittest.TestCase):
+    """Issue #14: no demo data — a new panel starts empty and the user enters sites, phrases and keys."""
 
+    def test_new_panel_has_no_sample_data(self):
         with TemporaryDirectory() as directory:
-            path = Path(directory) / "demo.sqlite3"
-            app = create_app(path, demo_search, demo=True)
-            seed(path)
-            client = app.test_client()
-            self.assertIn("На балансе недостаточно средств", client.get("/").get_data(as_text=True))
-            for view in ("keywords", "clusters", "positions", "visits", "schedule", "expenses"):
-                with self.subTest(view=view):
-                    response = client.get(f"/projects/2/{view}")
-                    self.assertEqual(response.status_code, 200)
-            visits = client.get("/projects/2/visits?deleted=1").get_data(as_text=True)
-            self.assertIn("Потолки в ванную", visits)
-            self.assertIn("visit-miss", visits)
-            self.assertIn("visit-high", visits)
-            positions = client.get("/projects/2/positions").get_data(as_text=True)
-            self.assertEqual(positions.count("data-day="), 10)
+            path = Path(directory) / "panel.sqlite3"
+            client = create_app(path).test_client()
+            home = client.get("/").get_data(as_text=True)
+            self.assertIn("Добавьте сайт и поисковые фразы", home)
+            settings = client.get("/settings").get_data(as_text=True)
+            self.assertIn("Профили не добавлены.", settings)
+            self.assertIn("Прокси не добавлены.", settings)
+            with connect(path) as db:
+                tables = [row[0] for row in db.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
+                for table in tables:
+                    with self.subTest(table=table):
+                        self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0)
 
-    def test_demo_agent_waits_for_captcha_then_finishes(self):
-        from examples.dashboard_demo import DemoAgent, demo_search, seed, seed_agent
+    def test_repository_ships_no_demo_dataset(self):
+        root = Path(__file__).resolve().parents[1]
+        self.assertFalse((root / "examples" / "dashboard_demo.py").exists())
+        from dashboard.config_import import read_config
 
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "demo.sqlite3"
-            create_app(path, demo_search, demo=True)
-            seed(path)
-            seed_agent(path)
-            with connect(path) as db:
-                session_id = start_agent_session(db, 2, None)
-                db.execute("UPDATE agent_sessions SET resume = 1 WHERE id = ?", (session_id,))
-            self.assertEqual(DemoAgent(step=0)(path, session_id), "complete")
-            with connect(path) as db:
-                row = db.execute("SELECT status, message, report_json FROM agent_sessions WHERE id = ?",
-                                 (session_id,)).fetchone()
-            report = json.loads(row["report_json"])
-            self.assertEqual((row["status"], row["message"]), ("DONE", "Найдено 4 из 5 фраз."))
-            operations = [event["operation"] for event in report["events"]]
-            self.assertIn("Капча", operations)
-            self.assertIn("Оператор нажал «Продолжить»", operations)
-            self.assertIn("Уточнённый запрос", operations)
-            with connect(path) as db:
-                session_id = start_agent_session(db, 2, None)
-            self.assertEqual(DemoAgent(step=0, captcha_wait=0)(path, session_id), "failed")
-            with connect(path) as db:
-                self.assertEqual(db.execute("SELECT status FROM agent_sessions WHERE id = ?", (session_id,)).fetchone()[0],
-                                 "ERROR")
+        template = (root / "examples" / "panel.example.yaml").read_text(encoding="utf-8")
+        connection, projects = read_config(template)
+        self.assertEqual(projects, [])
+        self.assertEqual((connection["yandex_api_key"], connection["yandex_folder_id"]), ("", ""))
+        from modules.config import read_config as read_agent_config
+
+        with self.assertRaisesRegex(ValueError, "TARGET_DOMAIN: требуется непустая строка"):
+            read_agent_config(root / "config.yaml")
 
 
 class SearchRankTest(unittest.TestCase):

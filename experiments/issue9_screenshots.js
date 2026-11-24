@@ -1,3 +1,4 @@
+// Historical: examples/dashboard_demo.py was removed in issue #14 (no demo data); see experiments/issue14_screenshots.js.
 // Capture the TopPult-style dashboard screens from a running demo.
 //   python -m examples.dashboard_demo --port 8091
 //   NODE_PATH="$(npm root -g)" node experiments/issue9_screenshots.js http://127.0.0.1:8091 docs/screenshots

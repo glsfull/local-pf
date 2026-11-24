@@ -1,7 +1,8 @@
 """YAML configuration import: `py -m dashboard --config panel.yaml`.
 
 The file fills the same fields as the «Настройки» page and the project form, with the same validation:
-connection settings (YANDEX_API_KEY, YANDEX_FOLDER_ID, position source, noVNC address) and projects
+connection settings (YANDEX_API_KEY, YANDEX_FOLDER_ID, position source, noVNC address,
+DEEPSEEK_API_KEY and the DeepSeek model) and projects
 with their keywords and refinement type. A project with the same site address is updated, not duplicated.
 See examples/panel.example.yaml.
 """
@@ -67,7 +68,9 @@ def read_config(text):
     settings = data.get("settings")
     connection = None
     if settings is not None:
-        check_keys(settings, {"yandex_api_key", "yandex_folder_id", "position_source", "novnc_url"}, "settings")
+        check_keys(settings, {
+            "yandex_api_key", "yandex_folder_id", "position_source", "novnc_url", "deepseek_api_key", "deepseek_model",
+        }, "settings")
         connection = read_connection({key: scalar(value) for key, value in settings.items()})
     projects = []
     items = data.get("projects") or []

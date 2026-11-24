@@ -3,6 +3,7 @@ import sqlite3
 
 from filelock import FileLock, Timeout
 
+from dashboard import identities
 from modules.clock import timestamp
 
 SCHEMA = """
@@ -161,6 +162,7 @@ def agent_lock(path):
 def initialize(path):
     with connect(path) as db:
         db.executescript(SCHEMA)
+        identities.initialize(db)
         columns = {row["name"] for row in db.execute("PRAGMA table_info(measurements)")}
         for column in ("found_url", "hint_found_url", "error", "hint_error"):
             if column not in columns:

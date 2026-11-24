@@ -1,8 +1,12 @@
-SEARCH_KEYWORD: "Wikipedia English main page"
-TARGET_DOMAIN: "wikipedia.org"
-TARGET_PAGES:
-  - url: "/wiki/Wikipedia:About"
-    expected_selector: "#firstHeading"
+# Разовая проверка без панели: python agent.py. Демо-данных нет — заполните свои значения.
+# Фраза, по которой ищется сайт в Яндексе, например «натяжные потолки москва».
+SEARCH_KEYWORD: ""
+# Домен вашего сайта без схемы и пути, например «ваш-сайт.ru».
+TARGET_DOMAIN: ""
+# Страницы сайта, которые агент открывает после перехода из выдачи:
+#   - url: "/catalog/"            # путь внутри сайта
+#     expected_selector: "h1"     # элемент, который должен появиться на странице
+TARGET_PAGES: []
 
 SEARCH_INPUT_SELECTOR: "#text, input[name='text']"
 SEARCH_BUTTON_SELECTOR: "#search-button, button[type='submit']"

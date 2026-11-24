@@ -1,6 +1,8 @@
 """Agent session started by «🚀 Запустить агента»: search → click on the target site for project phrases.
 
-For every selected phrase the agent opens ya.ru, types the phrase, presses «Найти», looks through
+Every selected phrase gets its own Yandex profile and proxy (see dashboard/identities.py): the agent
+opens a new Chromium with them, searches the phrase (and its refined query), closes the browser and
+after the project interval takes the next pair for the next phrase. For every phrase the agent opens ya.ru, types the phrase, presses «Найти», looks through
 up to five results pages and clicks the result of the project site. When the site is not found,
 the refined query of the phrase (brand or domain without the zone) is searched the same way;
 it is not used when the main phrase finds the site.
@@ -14,6 +16,7 @@ import logging
 import os
 import time
 
+from dashboard import identities
 from dashboard.search import domain_hint, site_host
 from dashboard.storage import AGENT_STATUSES, connect, finish_agent_session, update_agent_session
 
@@ -70,7 +73,7 @@ def captcha_visible(browser, config):
 class AgentSession:
     def __init__(
         self, path, session_id, *, search=find_target, wait=time.sleep, clock=time.monotonic,
-        captcha_wait=CAPTCHA_WAIT_SECONDS, poll=2.0, search_home=SEARCH_HOME, delay=None,
+        captcha_wait=CAPTCHA_WAIT_SECONDS, poll=2.0, search_home=SEARCH_HOME, delay=None, take_identity=None,
     ):
         self.path = path
         self.session_id = session_id
@@ -80,6 +83,7 @@ class AgentSession:
         self.captcha_wait = captcha_wait
         self.poll = poll
         self.search_home = search_home
+        self.take_identity = take_identity or self.next_identity
         if delay is None:
             delay = float(os.getenv("LOCAL_PF_OBSERVATION_DELAY", "0.7"))
         if not 0 <= delay <= 5:
@@ -195,20 +199,42 @@ class AgentSession:
             return outcome
         return outcome
 
-    def run(self, browser):
+    def next_identity(self):
+        """Least recently used profile and proxy from the panel settings."""
+        with connect(self.path) as db:
+            return identities.take_identity(db, identities.profiles_root(self.path))
+
+    def run(self, open_browser, close_browser):
+        """One phrase = one profile + one proxy: a new browser for every phrase."""
         project, words, domain = self.load()
         for index, word in enumerate(words):
             if index and project["interval_seconds"]:
                 self.wait(project["interval_seconds"])
-            self.run_keyword(browser, project, word, domain)
+            identity = self.take_identity()
+            self.journal.record(
+                "Профиль и прокси", None, query=word["phrase"], **identity.journal_details(),
+            )
+            self.set_status("STARTING", f"«{word['phrase']}»: {identity.describe()}.")
+            browser = open_browser(identity)
+            try:
+                outcome = self.run_keyword(browser, project, word, domain)
+            finally:
+                self.close(close_browser, browser)
+            outcome.update(identity.journal_details())
         found = sum(1 for item in self.report["keywords"] if item["found"])
         return f"Найдено {found} из {len(words)} фраз."
 
-    def execute(self, open_browser, close_browser):
-        browser = None
+    @staticmethod
+    def close(close_browser, browser):
         try:
-            browser = open_browser()
-            message = self.run(browser)
+            close_browser(browser)
+        except Exception:
+            log.exception("Не удалось закрыть Chromium")
+
+    def execute(self, open_browser, close_browser):
+        """open_browser(identity) → browser; the browser of every phrase is closed before the next one."""
+        try:
+            message = self.run(open_browser, close_browser)
         except Exception as error:
             if not isinstance(error, (RunError, ValueError)):
                 log.exception("Запуск агента остановлен")
@@ -216,12 +242,6 @@ class AgentSession:
             self.journal.record("Ошибка", self.journal.url, status=getattr(error, "status", "ERROR"), error=message)
             self.finish("failed", "ERROR", message)
             return 1
-        finally:
-            if browser is not None:
-                try:
-                    close_browser(browser)
-                except Exception:
-                    log.exception("Не удалось закрыть Chromium")
         self.finish("complete", "DONE", message)
         return 0
 
