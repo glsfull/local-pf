@@ -111,6 +111,19 @@ CREATE TABLE IF NOT EXISTS visit_stats (
     depth REAL,
     PRIMARY KEY (project_id, phrase, day)
 );
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id),
+    ordinal INTEGER,
+    state TEXT NOT NULL,
+    status TEXT NOT NULL,
+    message TEXT,
+    resume INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    report_json TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS active_agent ON agent_sessions((1)) WHERE state = 'running';
 CREATE TABLE IF NOT EXISTS panel_settings (
     key TEXT PRIMARY KEY,
     value TEXT
@@ -140,6 +153,11 @@ def run_lock(path):
     return FileLock(f"{path}.run.lock", timeout=0)
 
 
+def agent_lock(path):
+    """Held by agent.py while it drives Chromium for an agent session."""
+    return FileLock(f"{path}.agent.lock", timeout=0)
+
+
 def initialize(path):
     with connect(path) as db:
         db.executescript(SCHEMA)
@@ -157,6 +175,16 @@ def initialize(path):
             )
     except Timeout:
         # A browser agent can still be working after the dashboard process stops.
+        pass
+    try:
+        with agent_lock(path), connect(path) as db:
+            db.execute(
+                """UPDATE agent_sessions SET state = 'interrupted', status = 'ERROR',
+                   message = 'Панель была перезапущена во время работы агента.', finished_at = ?
+                   WHERE state = 'running'""",
+                (timestamp(),),
+            )
+    except Timeout:
         pass
 
 
@@ -276,4 +304,39 @@ def record_measurement(db, run_id, ordinal, hinted, rank, url, error):
     db.execute(
         f"UPDATE measurements SET {assignments} WHERE run_id = ? AND ordinal = ?",
         (rank, url, error, timestamp(), run_id, ordinal),
+    )
+
+
+AGENT_STATUSES = {
+    "STARTING": "Запуск",
+    "SEARCH": "Идёт поиск",
+    "FOUND": "Сайт найден",
+    "NOT_FOUND": "Сайт не найден",
+    "CAPTCHA": "Капча — ожидание оператора",
+    "ERROR": "Ошибка",
+    "DONE": "Завершено",
+}
+
+
+def start_agent_session(db, project_id, ordinal=None):
+    return db.execute(
+        """INSERT INTO agent_sessions(project_id, ordinal, state, status, message, started_at)
+           VALUES (?, ?, 'running', 'STARTING', 'Запуск агента в контейнере.', ?)""",
+        (project_id, ordinal, timestamp()),
+    ).lastrowid
+
+
+def update_agent_session(db, session_id, status, message=None, *, report_json=None):
+    db.execute(
+        """UPDATE agent_sessions SET status = ?, message = ?, report_json = COALESCE(?, report_json)
+           WHERE id = ? AND state = 'running'""",
+        (status, message, report_json, session_id),
+    )
+
+
+def finish_agent_session(db, session_id, state, status, message=None, *, report_json=None):
+    db.execute(
+        """UPDATE agent_sessions SET state = ?, status = ?, message = ?, finished_at = ?,
+           report_json = COALESCE(?, report_json), resume = 0 WHERE id = ? AND state = 'running'""",
+        (state, status, message, timestamp(), report_json, session_id),
     )

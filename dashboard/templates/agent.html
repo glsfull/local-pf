@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Агент{% endblock %}
+{% block content %}
+<header class="page-header">
+  <div class="title-row"><h1>Агент</h1></div>
+  <a class="button outline" href="{{ novnc_url }}" target="_blank" rel="noopener">🖥 Открыть noVNC</a>
+</header>
+<div class="agent-grid">
+  <section class="card stack">
+    <h2>Запуск</h2>
+    {% if not agent_enabled %}
+    <p class="alert warning">Агент не подключён. Запустите панель командой <code>py -m dashboard</code> и контейнер <code>dp-agent</code>.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('start_agent') }}" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="field">
+        <label class="field-label" for="agent-target">Проект и ключевая фраза</label>
+        <select id="agent-target" name="target" required>
+          {% for item in projects %}
+          <optgroup label="{{ item.row.name }}">
+            <option value="{{ item.row.id }}:" {{ 'selected' if selected == item.row.id ~ ':' }}>Все фразы проекта ({{ item.keywords|length }})</option>
+            {% for word in item.keywords %}
+            <option value="{{ item.row.id }}:{{ word.ordinal }}" {{ 'selected' if selected == item.row.id ~ ':' ~ word.ordinal }}>{{ word.phrase }} · {{ 'бренд «' ~ word.brand ~ '»' if word.hint_type == 'brand' else 'домен' }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+        <p class="hint">Агент открывает ya.ru, вводит фразу, нажимает «Найти», просматривает до 5 страниц выдачи (позиции 1–50) и открывает сайт проекта. Если сайт не найден, повторяет поиск с уточнением фразы (бренд или домен без зоны) — тип уточнения задаётся у каждой фразы во вкладке «Ключевики».</p>
+      </div>
+      <div><button class="button primary" {% if not agent_enabled or running or not projects %}disabled{% endif %}>🚀 Запустить агента</button></div>
+    </form>
+    <p class="hint">При капче агент останавливается и ждёт: решите её в окне noVNC или нажмите «Продолжить».</p>
+  </section>
+  <section class="card agent-status" {% if current %}data-agent-status="{{ url_for('agent_status', session_id=current.id) }}" data-agent-state="{{ current.state }}"{% endif %} aria-live="polite">
+    <h2>Статус</h2>
+    {% if not current %}
+    <p class="muted">Агент ещё не запускался.</p>
+    {% else %}
+    <p>{{ current.project }} · запуск №{{ current.id }} · {{ current.started_at|display_date }}</p>
+    <span class="agent-state status-{{ current.status }}" data-agent-label>{{ current.label }}</span>
+    <p data-agent-message>{{ current.message }}</p>
+    <form method="post" action="{{ url_for('resume_agent', session_id=current.id) }}" data-agent-resume {% if current.status != 'CAPTCHA' or current.state != 'running' %}hidden{% endif %}>
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <button class="button primary">Продолжить</button>
+    </form>
+    <h3>Фразы</h3>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Фраза</th><th>Запрос</th><th>Позиция</th><th>Страница</th></tr></thead>
+        <tbody data-agent-keywords>
+          {% for word in current.keywords %}
+          <tr><td>{{ word.phrase }}</td><td>{{ word.query or '—' }}{% if word.refined %} (уточнение){% endif %}</td><td>{{ word.position if word.found else 'не найден' }}</td><td>{{ word.page or '—' }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <h3>Последние действия</h3>
+    <ol class="agent-log" data-agent-log>
+      {% for event in current.events %}
+      <li><time>{{ (event.timestamp_msk or '')[11:19] }}</time><span>{{ event.operation }}{% if event.query %} · {{ event.query }}{% endif %}{% if event.page %} · стр. {{ event.page }}{% endif %}{% if event.error %} · {{ event.error }}{% endif %}</span></li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+</div>
+{% if history %}
+<section class="card">
+  <h2>История запусков</h2>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>№</th><th>Проект</th><th>Начало</th><th>Статус</th><th>Итог</th></tr></thead>
+      <tbody>
+        {% for row in history %}
+        <tr><td><a href="{{ url_for('agent_page', session=row.id) }}">{{ row.id }}</a></td><td>{{ row.name }}</td><td>{{ row.started_at|display_date }}</td><td>{{ agent_statuses.get(row.status, row.status) }}</td><td>{{ row.message or '—' }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -5,7 +5,7 @@
 {% block main_class %}page project-page{% endblock %}
 {% block content %}
 {% if not configured %}
-<p class="alert warning">Для сбора позиций подключите браузерный агент. <a href="{{ url_for('settings') }}">Настройки подключения</a></p>
+<p class="alert warning">Для съёма позиций укажите YANDEX_API_KEY и YANDEX_FOLDER_ID. <a href="{{ url_for('settings') }}">Настройки подключения</a></p>
 {% elif active %}
 <p class="alert info" role="status" data-poll>{{ 'Идёт сбор позиций проекта.' if active.project_id == project.id else 'Выполняется проверка другого проекта.' }} Страница обновится автоматически.</p>
 {% endif %}

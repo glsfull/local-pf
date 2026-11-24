@@ -4,6 +4,8 @@ from functools import partial
 import logging
 import os
 from pathlib import Path
+from threading import Timer
+import webbrowser
 
 from dotenv import load_dotenv
 from filelock import FileLock, Timeout
@@ -12,10 +14,18 @@ from werkzeug.serving import WSGIRequestHandler
 from modules.clock import MSK, MoscowFormatter
 
 from . import create_app
-from .agent_process import execute_agent
+from .agent_process import execute_agent, execute_agent_session
 from .scheduler import start_scheduler
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def open_panel(url, opener=webbrowser.open):
+    """Open the panel in the default browser; a missing browser is not an error."""
+    try:
+        opener(url)
+    except webbrowser.Error:
+        logging.getLogger(__name__).info("Откройте панель вручную: %s", url)
 
 
 class MoscowRequestHandler(WSGIRequestHandler):
@@ -32,6 +42,7 @@ def main():
     parser.add_argument("--container-db", help="Путь к общей SQLite-базе внутри контейнера")
     parser.add_argument("--container-log-dir", help="Путь к общей папке логов внутри контейнера")
     parser.add_argument("--local-agent", action="store_true", help="Chromium на локальном DISPLAY=:1")
+    parser.add_argument("--no-browser", action="store_true", help="Не открывать панель в браузере")
     parser.add_argument("--debug-log", action="store_true")
     args = parser.parse_args()
     handler = logging.StreamHandler()
@@ -46,8 +57,13 @@ def main():
             app = create_app(
                 path, report_path=args.log_dir / "report.json",
                 agent_runner=partial(execute_agent, options=args),
+                agent_session_runner=partial(execute_agent_session, options=args),
             )
             start_scheduler(path, app.launch_run)
+            url = f"http://127.0.0.1:{args.port}/"
+            logging.getLogger(__name__).info("Панель: %s", url)
+            if not args.no_browser:
+                Timer(1.0, open_panel, (url,)).start()
             app.run(
                 host="127.0.0.1", port=args.port, request_handler=MoscowRequestHandler,
             )

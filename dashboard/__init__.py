@@ -4,15 +4,18 @@ import getpass
 import io
 import json
 import logging
+import os
 from pathlib import Path
+import re
 import secrets
 import sqlite3
 from threading import Thread
 from time import monotonic
 
-from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 
-from modules.clock import MSK
+from modules.clock import MSK, timestamp
+from modules.journal import Journal
 
 from .forms import (
     COMPETITION, FREQUENCY_TYPES, NOT_FOUND_MODES, QUERY_REGIONS, REGIONS, SCHEDULE_MODES, THEMES, WEEKDAYS,
@@ -22,9 +25,11 @@ from .forms import (
 from .history import TIER_LABELS, moscow_date, rank_tier, read_history, visibility
 from .runner import execute_run
 from .search import domain_hint, site_host
+from .search_api import DAY_PRICE, NIGHT_PRICE, SOURCE as API_SOURCE, YandexDeferredSearch
 from .storage import (
-    DEFAULT_SETTINGS, connect, finish_run, initialize, panel_setting, project_keywords, project_settings,
-    save_panel_setting, save_project, save_project_settings, start_run,
+    AGENT_STATUSES, DEFAULT_SETTINGS, connect, finish_agent_session, finish_run, initialize, panel_setting,
+    project_keywords, project_settings, save_panel_setting, save_project, save_project_settings, start_agent_session,
+    start_run,
 )
 from . import views
 
@@ -40,6 +45,10 @@ PROJECT_TABS = (
     ("schedule", "Расписание"), ("expenses", "Расходы"), ("settings", "Настройки"),
 )
 EXPORTS = ("keywords", "clusters", "positions", "visits")
+POSITION_SOURCES = {"api": "Yandex Search API (отложенные запросы)", "browser": "Браузерный парсер выдачи"}
+DEFAULT_NOVNC_URL = "http://localhost:56565/"
+AGENT_EVENTS_SHOWN = 15
+FOLDER_ID = re.compile(r"[a-z0-9]{1,50}")
 logger = logging.getLogger(__name__)
 
 
@@ -75,7 +84,14 @@ def csv_response(name, header, rows):
     )
 
 
-def create_app(path, search_page=None, *, demo=False, report_path=None, agent_runner=None):
+def mask_secret(value):
+    return "••••" + value[-4:] if len(value) > 8 else "••••"
+
+
+def create_app(
+    path, search_page=None, *, demo=False, report_path=None, agent_runner=None, agent_session_runner=None,
+    api_factory=YandexDeferredSearch,
+):
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=secrets.token_hex(32),
@@ -88,25 +104,50 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
         report_path = Path(report_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     initialize(path)
-    source = "Демо-данные" if demo else "Парсер выдачи"
-    configured = agent_runner is not None or search_page is not None
+    browser_source = "Демо-данные" if demo else "Парсер выдачи"
+    browser_configured = agent_runner is not None or search_page is not None
 
     def read_balance(db):
         value = panel_setting(db, "balance")
         return None if value in (None, "") else float(value)
+
+    def api_credentials(db):
+        """YANDEX_API_KEY and YANDEX_FOLDER_ID from the panel settings, with the environment as a fallback."""
+        key = panel_setting(db, "yandex_api_key") or os.getenv("YANDEX_API_KEY", "")
+        folder = panel_setting(db, "yandex_folder_id") or os.getenv("YANDEX_FOLDER_ID", "")
+        return key.strip(), folder.strip()
+
+    def position_source(db):
+        """(label, uses_api): the API is used when it is selected and both credentials are present."""
+        if demo:
+            return browser_source, False
+        wanted = panel_setting(db, "position_source", "api")
+        if wanted == "api" and all(api_credentials(db)):
+            return API_SOURCE, True
+        if wanted == "api" and not browser_configured:
+            return API_SOURCE, False
+        return browser_source, False
+
+    def novnc_url(db):
+        return panel_setting(db, "novnc_url") or os.getenv("LOCAL_PF_NOVNC_URL", DEFAULT_NOVNC_URL)
 
     @app.context_processor
     def template_context():
         with connect(path) as db:
             balance = read_balance(db)
             user_name = panel_setting(db, "user_name") or getpass.getuser()
+            source, uses_api = position_source(db)
+            novnc = novnc_url(db)
         return {
             "brand": BRAND,
             "year": datetime.now(MSK).year,
             "balance": balance,
             "user_name": user_name,
             "source": source,
-            "configured": configured,
+            "uses_api": uses_api,
+            "configured": uses_api or browser_configured,
+            "agent_enabled": agent_session_runner is not None,
+            "novnc_url": novnc,
             "demo": demo,
             "agent_logs_enabled": report_path is not None,
             "states": RUN_STATES,
@@ -192,11 +233,16 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             return None
         busy = False
         try:
-            if not configured:
-                raise Conflict("Подключите браузерный агент для проверки позиций.")
             try:
                 with connect(path) as db:
                     db.execute("BEGIN IMMEDIATE")
+                    source, uses_api = position_source(db)
+                    credentials = api_credentials(db)
+                    if not uses_api and not browser_configured:
+                        raise Conflict(
+                            "Укажите YANDEX_API_KEY и YANDEX_FOLDER_ID в настройках панели "
+                            "или подключите браузерный агент."
+                        )
                     item = get_project(db, project_id)
                     balance = read_balance(db)
                     if balance is not None and balance <= 0:
@@ -227,7 +273,9 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             raise
         deferred.pop(project_id, None)
         try:
-            if agent_runner is not None:
+            if uses_api:
+                Thread(target=execute_api_run, args=(path, run_id, credentials), daemon=True).start()
+            elif agent_runner is not None:
                 Thread(target=agent_runner, args=(path, run_id), daemon=True).start()
             else:
                 Thread(target=execute_run, args=(path, run_id, search_page), daemon=True).start()
@@ -238,6 +286,24 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
         return run_id
 
     app.launch_run = launch_run
+
+    def execute_api_run(path, run_id, credentials):
+        """Positions through deferred Yandex Search API requests: runs on the host, no browser needed."""
+        report = {"timestamp": timestamp(), "run_id": run_id, "captcha_encountered": False,
+                  "pages_checked": [], "events": []}
+        try:
+            with connect(path) as db:
+                url = db.execute("SELECT project_url FROM runs WHERE id = ?", (run_id,)).fetchone()["project_url"]
+            report["target_domain"] = site_host(url)
+            search = api_factory(*credentials, Journal(report["events"], 0), report)
+        except Exception as exc:
+            logger.exception("Не удалось подготовить Yandex Search API")
+            with connect(path) as db:
+                finish_run(db, run_id, "failed", f"Yandex Search API: {exc}")
+            return "failed"
+        return execute_run(path, run_id, search, report=report)
+
+    app.execute_api_run = execute_api_run
 
     @app.get("/")
     def projects():
@@ -610,6 +676,18 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
                     raise ValueError("Имя пользователя — до 50 символов.")
                 if telegram and (not telegram.startswith("https://") or not validate_url(telegram)):
                     raise ValueError("Ссылка на Телеграм-группу должна начинаться с https://.")
+                api_key = request.form.get("yandex_api_key", "").strip()
+                folder_id = request.form.get("yandex_folder_id", "").strip()
+                wanted_source = request.form.get("position_source", "api")
+                novnc = request.form.get("novnc_url", "").strip()
+                if api_key and (len(api_key) > 200 or any(char.isspace() for char in api_key)):
+                    raise ValueError("YANDEX_API_KEY: ключ без пробелов, до 200 символов.")
+                if folder_id and not FOLDER_ID.fullmatch(folder_id):
+                    raise ValueError("YANDEX_FOLDER_ID: латинские буквы и цифры, до 50 символов.")
+                if wanted_source not in POSITION_SOURCES:
+                    raise ValueError("Выберите источник позиций.")
+                if novnc and (not novnc.startswith(("http://", "https://")) or not validate_url(novnc)):
+                    raise ValueError("Адрес noVNC должен начинаться с http:// или https://.")
             except ValueError as exc:
                 error = str(exc)
             else:
@@ -617,12 +695,35 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
                     save_panel_setting(db, "balance", "" if balance is None else str(balance))
                     save_panel_setting(db, "user_name", user_name)
                     save_panel_setting(db, "telegram_url", telegram)
+                    # An empty key field keeps the saved key: the key is never sent back to the browser.
+                    if request.form.get("clear_api_key"):
+                        save_panel_setting(db, "yandex_api_key", "")
+                    elif api_key:
+                        save_panel_setting(db, "yandex_api_key", api_key)
+                    save_panel_setting(db, "yandex_folder_id", folder_id)
+                    save_panel_setting(db, "position_source", wanted_source)
+                    save_panel_setting(db, "novnc_url", novnc)
                 return redirect(url_for("settings"), code=303)
         with connect(path) as db:
-            values = {key: panel_setting(db, key, "") for key in ("balance", "user_name", "telegram_url")}
+            values = {
+                key: panel_setting(db, key, "")
+                for key in ("balance", "user_name", "telegram_url", "yandex_folder_id", "novnc_url")
+            }
+            values["position_source"] = panel_setting(db, "position_source", "api")
+            saved_key = panel_setting(db, "yandex_api_key", "")
+            env_key, env_folder = os.getenv("YANDEX_API_KEY", ""), os.getenv("YANDEX_FOLDER_ID", "")
         if values["balance"]:
             values["balance"] = metric(float(values["balance"])).replace(" ", "")
-        return render_template("settings.html", values=values, error=error), 422 if error else 200
+        key_state = (
+            f"Ключ сохранён в панели: {mask_secret(saved_key)}" if saved_key
+            else f"Используется YANDEX_API_KEY из .env: {mask_secret(env_key)}" if env_key
+            else "Ключ не задан."
+        )
+        return render_template(
+            "settings.html", values=values, error=error, key_state=key_state, has_saved_key=bool(saved_key),
+            env_folder=env_folder, position_sources=POSITION_SOURCES, day_price=DAY_PRICE, night_price=NIGHT_PRICE,
+            browser_configured=browser_configured,
+        ), 422 if error else 200
 
     @app.get("/help")
     def help_page():
@@ -637,6 +738,95 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
         except Conflict as exc:
             abort(409, str(exc))
         return redirect(url_for("project", project_id=project_id), code=303)
+
+    def agent_session_view(row):
+        report = json.loads(row["report_json"]) if row["report_json"] else {}
+        events = report.get("events", []) if isinstance(report, dict) else []
+        return {
+            "id": row["id"], "project_id": row["project_id"], "project": row["name"], "state": row["state"],
+            "status": row["status"], "label": AGENT_STATUSES.get(row["status"], row["status"]),
+            "message": row["message"] or "", "started_at": row["started_at"], "finished_at": row["finished_at"],
+            "keywords": report.get("keywords", []) if isinstance(report, dict) else [],
+            "events": events[-AGENT_EVENTS_SHOWN:][::-1],
+        }
+
+    def read_agent_session(db, session_id=None):
+        row = db.execute(
+            """SELECT s.*, p.name FROM agent_sessions s JOIN projects p ON p.id = s.project_id
+               WHERE ? IS NULL OR s.id = ? ORDER BY s.id DESC LIMIT 1""",
+            (session_id, session_id),
+        ).fetchone()
+        if row is None and session_id is not None:
+            abort(404)
+        return row and agent_session_view(row)
+
+    @app.get("/agent")
+    def agent_page():
+        session_id = request.args.get("session", type=int)
+        with connect(path) as db:
+            db.execute("BEGIN")
+            current = read_agent_session(db, session_id)
+            projects = [
+                {"row": item, "keywords": project_keywords(db, item["id"])}
+                for item in db.execute("SELECT * FROM projects ORDER BY id DESC").fetchall()
+            ]
+            history = db.execute(
+                """SELECT s.id, s.state, s.status, s.message, s.started_at, p.name FROM agent_sessions s
+                   JOIN projects p ON p.id = s.project_id ORDER BY s.id DESC LIMIT 10""",
+            ).fetchall()
+            running = db.execute("SELECT 1 FROM agent_sessions WHERE state = 'running'").fetchone() is not None
+        return render_template(
+            "agent.html", current=current, projects=projects, history=history, running=running,
+            agent_statuses=AGENT_STATUSES, selected=request.args.get("target", ""),
+        )
+
+    @app.get("/agent/<int:session_id>/status.json")
+    def agent_status(session_id):
+        with connect(path) as db:
+            return jsonify(read_agent_session(db, session_id))
+
+    @app.post("/agent/start")
+    def start_agent():
+        if agent_session_runner is None:
+            abort(409, "Агент не подключён: запустите панель командой py -m dashboard и контейнер dp-agent.")
+        try:
+            project_id, _, ordinal = request.form.get("target", "").partition(":")
+            project_id, ordinal = int(project_id), int(ordinal) if ordinal else None
+        except ValueError:
+            abort(400, "Выберите проект и ключевую фразу.")
+        try:
+            with connect(path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                get_project(db, project_id)
+                exists = db.execute(
+                    "SELECT 1 FROM keywords WHERE project_id = ? AND (? IS NULL OR ordinal = ?)",
+                    (project_id, ordinal, ordinal),
+                ).fetchone()
+                if exists is None:
+                    abort(409, "Добавьте поисковые фразы в проект.")
+                session_id = start_agent_session(db, project_id, ordinal)
+        except sqlite3.IntegrityError as exc:
+            if "active_agent" not in str(exc):
+                raise
+            abort(409, "Агент уже работает. Дождитесь окончания текущего запуска.")
+        try:
+            Thread(target=agent_session_runner, args=(path, session_id), daemon=True).start()
+        except RuntimeError:
+            logger.exception("Не удалось запустить агента %s", session_id)
+            with connect(path) as db:
+                finish_agent_session(db, session_id, "failed", "ERROR", "Не удалось запустить агента.")
+        return redirect(url_for("agent_page", session=session_id), code=303)
+
+    @app.post("/agent/<int:session_id>/resume")
+    def resume_agent(session_id):
+        with connect(path) as db:
+            updated = db.execute(
+                "UPDATE agent_sessions SET resume = 1 WHERE id = ? AND state = 'running' AND status = 'CAPTCHA'",
+                (session_id,),
+            ).rowcount
+        if not updated:
+            abort(409, "Агент не ожидает оператора.")
+        return redirect(url_for("agent_page", session=session_id), code=303)
 
     @app.get("/logs")
     def agent_logs():

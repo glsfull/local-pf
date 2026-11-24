@@ -17,6 +17,10 @@ SEARCH_HOME = "https://ya.ru"
 log = logging.getLogger(__name__)
 
 
+class TargetNotFound(RunError):
+    status = "NOT_FOUND"
+
+
 class SearchChallenge(RunError):
     status = "CAPTCHA"
 
@@ -71,24 +75,44 @@ def find_target(browser, config, report, journal, search_home=SEARCH_HOME):
         check_challenge(results, results.url, config)
         return results.eles(f"css:{config.result_link}", timeout=0)
 
-    links = wait_for(result_links, config.timeout) or []
-    log.info("Найдено ссылок в выдаче: %d", len(links))
-    for link in links:
-        href = link.attr("href") or ""
-        host = hostname(href)
-        log.debug("Домен ссылки из выдачи: %s", host)
-        if link.states.is_displayed and matches_domain(href, config.domain):
-            report["search_result_found"] = True
-            journal.step("Клик по результату", results.url, destination=href)
-            landing, state = click_and_follow(browser, results, link, config.timeout)
-            journal.record("Переход на целевой сайт", state["url"], http_status=state["status"])
-            if matches_domain(state["url"], config.domain):
-                check_challenge(landing, state["url"], config)
+    position = 0
+    for page in range(1, config.max_pages + 1):
+        links = wait_for(result_links, config.timeout) or []
+        log.info("Найдено ссылок в выдаче на странице %d: %d", page, len(links))
+        for link in links:
+            if not link.states.is_displayed:
+                continue
+            position += 1
+            href = link.attr("href") or ""
+            log.debug("Домен ссылки из выдачи: %s", hostname(href))
+            if matches_domain(href, config.domain):
+                report["search_result_found"] = True
+                report["search_position"] = position
+                report["search_page"] = page
+                journal.step("Клик по результату", results.url, destination=href, page=page, position=position)
+                landing, state = click_and_follow(browser, results, link, config.timeout)
+                journal.record("Переход на целевой сайт", state["url"], http_status=state["status"])
+                if matches_domain(state["url"], config.domain):
+                    check_challenge(landing, state["url"], config)
+                    check_document(state)
+                    return landing
+                if matches_domain(state["url"], "ya.ru") or matches_domain(state["url"], "yandex.ru"):
+                    check_challenge(landing, state["url"], config)
                 check_document(state)
-                return landing
-            if matches_domain(state["url"], "ya.ru") or matches_domain(state["url"], "yandex.ru"):
-                check_challenge(landing, state["url"], config)
-            check_document(state)
-            raise RunError("После клика открылся другой домен")
+                raise RunError("После клика открылся другой домен")
+        if page == config.max_pages:
+            break
+        following = results.ele(f"css:{config.next_page}", timeout=0)
+        journal.record(
+            "Проверка элемента", results.url, selector=config.next_page,
+            found=bool(following), status="OK" if following else "NOT_FOUND",
+        )
+        if not following:
+            break
+        journal.step("Следующая страница выдачи", results.url, page=page + 1)
+        results, state = click_and_follow(browser, results, following, config.timeout)
+        journal.record("Переход к выдаче", state["url"], http_status=state["status"], page=page + 1)
+        check_challenge(results, state["url"], config)
+        check_document(state)
 
-    raise RunError(f"Целевой домен {config.domain} отсутствует в доступной выдаче")
+    raise TargetNotFound(f"Целевой домен {config.domain} отсутствует в выдаче (страниц: {page}, позиций: {position})")

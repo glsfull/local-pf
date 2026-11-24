@@ -18,8 +18,19 @@
   <div class="toolbar-group">
     <form method="post" action="{{ url_for('new_run', project_id=project.id) }}">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-      <button class="button primary" {% if not configured or active or low_balance %}disabled{% endif %}>Собрать позиции</button>
+      <button class="button primary" {% if not configured or active or low_balance %}disabled{% endif %} title="{{ source }}">📸 Снять позиции</button>
     </form>
+    {% if agent_enabled %}
+    <form method="post" action="{{ url_for('start_agent') }}" class="toolbar-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <label class="sr-only" for="agent-target">Фраза для агента</label>
+      <select id="agent-target" name="target">
+        <option value="{{ project.id }}:">Все фразы проекта</option>
+        {% for word in keywords %}<option value="{{ project.id }}:{{ word.ordinal }}">{{ word.phrase }}</option>{% endfor %}
+      </select>
+      <button class="button outline" {% if not keywords %}disabled{% endif %}>🚀 Запустить агента</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% if low_balance %}

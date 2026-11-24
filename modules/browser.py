@@ -30,7 +30,8 @@ def open_browser(timeout, *, headless=False, profile=None):
     if profile is not None:
         options.set_tmp_path(str(profile))
     options.set_argument("--disable-dev-shm-usage")
-    if hasattr(os, "geteuid") and os.geteuid() == 0:
+    # The sandbox needs kernel features that Docker hides; root cannot use it at all.
+    if (hasattr(os, "geteuid") and os.geteuid() == 0) or os.path.exists("/.dockerenv"):
         options.set_argument("--no-sandbox")
     options.set_retry(0).set_timeouts(base=timeout, page_load=timeout, script=timeout)
     options.headless(headless)
