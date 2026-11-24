@@ -142,12 +142,8 @@
   </section>
   <section class="card connection">
     <h2>Настройки подключения · {{ source }}</h2>
-    {% if demo %}
-    <p>Панель использует локальный пример поисковой выдачи.</p>
-    {% else %}
     <p>Позиции снимаются через Yandex Search API без браузера и капчи; «🚀 Запустить агента» открывает Chromium в контейнере dp-agent.</p>
     <p>Держите <a href="{{ novnc_url }}" target="_blank" rel="noopener">noVNC</a> открытым во время работы агента.</p>
-    {% endif %}
   </section>
 </div>
 {% endblock %}

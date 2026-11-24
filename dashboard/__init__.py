@@ -87,7 +87,7 @@ def mask_secret(value):
 
 
 def create_app(
-    path, search_page=None, *, demo=False, report_path=None, agent_runner=None, agent_session_runner=None,
+    path, search_page=None, *, report_path=None, agent_runner=None, agent_session_runner=None,
     api_factory=YandexDeferredSearch,
 ):
     app = Flask(__name__)
@@ -102,7 +102,7 @@ def create_app(
         report_path = Path(report_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     initialize(path)
-    browser_source = "Демо-данные" if demo else "Парсер выдачи"
+    browser_source = "Парсер выдачи"
     browser_configured = agent_runner is not None or search_page is not None
 
     def read_balance(db):
@@ -117,8 +117,6 @@ def create_app(
 
     def position_source(db):
         """(label, uses_api): the API is used when it is selected and both credentials are present."""
-        if demo:
-            return browser_source, False
         wanted = panel_setting(db, "position_source", "api")
         if wanted == "api" and all(api_credentials(db)):
             return API_SOURCE, True
@@ -146,7 +144,6 @@ def create_app(
             "configured": uses_api or browser_configured,
             "agent_enabled": agent_session_runner is not None,
             "novnc_url": novnc,
-            "demo": demo,
             "agent_logs_enabled": report_path is not None,
             "states": RUN_STATES,
             "competition_labels": COMPETITION,

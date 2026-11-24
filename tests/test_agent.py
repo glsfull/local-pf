@@ -130,7 +130,7 @@ class BrowserTests(unittest.TestCase):
         cls.addClassCleanup(cls.server.shutdown)
         cls.search_home = f"http://localhost:{cls.server.server_port}"
         cls.config = replace(
-            read_config(Path(__file__).resolve().parents[1] / "config.yaml"),
+            read_config(Path(__file__).resolve().parent / "fixtures" / "agent.yaml"),
             keyword="проверочный запрос",
             domain="127.0.0.1",
             result_link="a.result",
@@ -388,7 +388,7 @@ class UnitTests(unittest.TestCase):
     @patch("agent.find_target")
     @patch("agent.open_browser")
     def test_report_is_readable_before_browser_closes(self, launch, *_):
-        config = read_config(Path(__file__).resolve().parents[1] / "config.yaml")
+        config = read_config(Path(__file__).resolve().parent / "fixtures" / "agent.yaml")
         with TemporaryDirectory() as output:
             log_dir = Path(output)
             log_file = log_dir / "agent.log"
@@ -432,7 +432,7 @@ class UnitTests(unittest.TestCase):
 
     @patch("agent.open_browser", side_effect=PageDisconnectedError)
     def test_browser_restarts_at_most_twice(self, launch):
-        config = read_config(Path(__file__).resolve().parents[1] / "config.yaml")
+        config = read_config(Path(__file__).resolve().parent / "fixtures" / "agent.yaml")
         report = {"search_result_found": True, "pages_checked": [{}]}
         with self.assertLogs(level=logging.ERROR):
             self.assertEqual(run(config, report), 1)

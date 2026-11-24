@@ -394,7 +394,8 @@ class AgentSessionTest(DashboardCase):
 
 
 class ConfigImportTest(DashboardCase):
-    EXAMPLE = ROOT / "examples" / "panel.example.yaml"
+    EXAMPLE = ROOT / "tests" / "fixtures" / "panel.yaml"
+    TEMPLATE = ROOT / "examples" / "panel.example.yaml"
 
     def write(self, text):
         config = Path(self.directory.name) / "panel.yaml"
@@ -540,6 +541,6 @@ class EntrypointTest(unittest.TestCase):
             self.assertEqual("--no-sandbox" in options.arguments, expected)
 
     def test_config_search_depth(self):
-        config = read_config(ROOT / "config.yaml")
+        config = read_config(ROOT / "tests" / "fixtures" / "agent.yaml")
         self.assertEqual(config.max_pages, 5)
         self.assertIn("Pager-Item_type_next", config.next_page)

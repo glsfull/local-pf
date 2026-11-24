@@ -1,0 +1,18 @@
+# Тестовая конфигурация агента для tests/test_agent.py и tests/test_issue12.py (публичная страница,
+# не демо-данные проекта). Для своей проверки заполните config.yaml в корне репозитория.
+SEARCH_KEYWORD: "Wikipedia English main page"
+TARGET_DOMAIN: "wikipedia.org"
+TARGET_PAGES:
+  - url: "/wiki/Wikipedia:About"
+    expected_selector: "#firstHeading"
+
+SEARCH_INPUT_SELECTOR: "#text, input[name='text']"
+SEARCH_BUTTON_SELECTOR: "#search-button, button[type='submit']"
+RESULT_LINK_SELECTOR: "a.OrganicTitle-Link, .serp-item h2 a, .serp-item h3 a"
+CAPTCHA_SELECTOR: "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
+TIMEOUT_SECONDS: 15
+OBSERVATION_DELAY_SECONDS: 0.7
+
+# Глубина поиска агента: страниц выдачи по 10 результатов (1–5, до 50-й позиции).
+SEARCH_DEPTH_PAGES: 5
+NEXT_PAGE_SELECTOR: "a.Pager-Item_type_next, a[aria-label='Следующая страница']"

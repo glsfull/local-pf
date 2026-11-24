@@ -47,7 +47,7 @@
         <details class="dropdown align-end" data-dropdown>
           <summary class="user"><span class="avatar" aria-hidden="true">{{ user_name[:1]|upper }}</span><span class="user-name">{{ user_name }}</span> <span class="chevron" aria-hidden="true"></span></summary>
           <div class="dropdown-menu">
-            <p class="dropdown-note"><span class="provider-dot {{ 'ready' if configured else '' }}" aria-hidden="true"></span>{{ source }} · {{ 'локальный пример' if demo else ('Chromium · noVNC' if configured else 'требуется подключение') }}</p>
+            <p class="dropdown-note"><span class="provider-dot {{ 'ready' if configured else '' }}" aria-hidden="true"></span>{{ source }} · {{ 'Chromium · noVNC' if configured else 'требуется подключение' }}</p>
             <a href="{{ url_for('settings') }}">Настройки панели</a>
             {% if agent_logs_enabled %}<a href="{{ url_for('agent_logs') }}">Логи агента</a>{% endif %}
           </div>

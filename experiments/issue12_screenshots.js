@@ -1,3 +1,4 @@
+// Historical: examples/dashboard_demo.py was removed in issue #14 (no demo data); see experiments/issue14_screenshots.js.
 // Capture the issue #12 screens from a running demo and walk the agent flow end to end.
 //   python -m examples.dashboard_demo --port 8091 --balance 1500
 //   NODE_PATH="$(npm root -g)" node experiments/issue12_screenshots.js http://127.0.0.1:8091 docs/screenshots
