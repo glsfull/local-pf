@@ -190,7 +190,7 @@ def is_brand(phrase, brands):
     return any(brand.casefold() in folded for brand in brands if brand)
 
 
-def visit_matrix(db, project_id, words, settings, latest, args, today):
+def visit_matrix(db, project_id, words, settings, latest, args, today, *, paginate=True):
     since, until, limit, period = period_days(args, today)
     rows = db.execute(
         "SELECT * FROM visit_stats WHERE project_id = ? ORDER BY day DESC, phrase", (project_id,),
@@ -240,7 +240,7 @@ def visit_matrix(db, project_id, words, settings, latest, args, today):
         "planned": sum(item["planned"] for item in totals.values()),
         "cost": sum(item["cost"] for item in totals.values()),
     }
-    page, pagination = page_slice(result, args)
+    page, pagination = page_slice(result, args) if paginate else (result, None)
     return {
         "days": days, "lines": page, "totals": totals, "summary": summary, "pagination": pagination,
         "period": period, "since": since, "until": until, "brand": mode, "deleted": deleted,

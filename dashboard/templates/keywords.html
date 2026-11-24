@@ -76,7 +76,7 @@
         <td data-column="demand">{% if word.demand %}<span class="delta {{ 'up' if word.demand > 0 else 'down' }}">{{ word.demand|signed }}</span>{% else %}{{ word.demand|metric }}{% endif %}</td>
         <td data-column="power">
           <span class="inline-edit">
-            <span class="input-suffix"><input form="{{ form_id }}" name="power" inputmode="decimal" size="3" value="{{ (word.power if word.power is not none else 10)|metric }}" aria-label="Мощность для {{ word.phrase }}, %"><span aria-hidden="true">%</span></span>
+            <span class="input-suffix"><input form="{{ form_id }}" name="power" inputmode="decimal" size="3" value="{{ word.power|metric if word.power is not none else '' }}" placeholder="10" aria-label="Мощность для {{ word.phrase }}, %"><span aria-hidden="true">%</span></span>
             <button class="icon-button" form="{{ form_id }}" name="auto" value="1" type="submit" title="Подобрать мощность автоматически" aria-label="Подобрать мощность автоматически">🪄</button>
           </span>
         </td>

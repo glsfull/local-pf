@@ -8,6 +8,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 from threading import Thread
+from time import monotonic
 
 from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
 
@@ -46,6 +47,9 @@ class Conflict(Exception):
     """A position check cannot start right now."""
 
 
+SCHEDULE_RETRY_SECONDS = 30 * 60
+
+
 def today_msk():
     return datetime.now(MSK).date()
 
@@ -55,11 +59,16 @@ def plain(value):
     return int(value) if isinstance(value, float) and value.is_integer() else value
 
 
+def csv_cell(value):
+    """Keep spreadsheet apps from treating a phrase or URL like «=HYPERLINK(...)» as a formula."""
+    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r") else value
+
+
 def csv_response(name, header, rows):
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";")
     writer.writerow(header)
-    writer.writerows(rows)
+    writer.writerows([csv_cell(value) for value in row] for row in rows)
     return Response(
         "﻿" + buffer.getvalue(), mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
@@ -171,8 +180,17 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             return redirect(target, code=303)
         return redirect(url_for("project", project_id=project_id, view=view), code=303)
 
+    deferred = {}
+
     def launch_run(project_id, *, scheduled=False):
-        """Start a position check. Manual starts raise Conflict, scheduled ones return None instead."""
+        """Start a position check. Manual starts raise Conflict, scheduled ones return None instead.
+
+        A scheduled start that cannot proceed for a reason other than a running check (no money, no phrases)
+        is retried after SCHEDULE_RETRY_SECONDS instead of on every scheduler tick.
+        """
+        if scheduled and project_id in deferred and monotonic() - deferred[project_id] < SCHEDULE_RETRY_SECONDS:
+            return None
+        busy = False
         try:
             if not configured:
                 raise Conflict("Подключите браузерный агент для проверки позиций.")
@@ -198,12 +216,16 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             except sqlite3.IntegrityError as exc:
                 if "active_run" not in str(exc):
                     raise
+                busy = True
                 raise Conflict("Дождитесь окончания текущей проверки.") from None
         except Conflict as exc:
             if scheduled:
+                if not busy:
+                    deferred[project_id] = monotonic()
                 logger.info("Автоматический сбор позиций проекта %s отложен. %s", project_id, exc)
                 return None
             raise
+        deferred.pop(project_id, None)
         try:
             if agent_runner is not None:
                 Thread(target=agent_runner, args=(path, run_id), daemon=True).start()
@@ -474,7 +496,7 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             db.execute("BEGIN IMMEDIATE")
             item = get_project(db, project_id)
             words = project_keywords(db, project_id)
-            _, lines, _ = read_history(db, project_id, limit=1)
+            _, lines, _ = read_history(db, project_id, limit=None)
             groups = views.recluster(words, lines)
             site = site_host(item["url"])
             for word in words:
@@ -565,7 +587,7 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
             _, _, latest = read_history(db, project_id, limit=1)
             data = views.visit_matrix(
                 db, project_id, words, project_settings(db, project_id), latest,
-                {**request.args, "per_page": "100000"}, today,
+                request.args, today, paginate=False,
             )
             return csv_response(name, ("Запрос", "Найденный URL", "Расход, ₽", *(day.isoformat() for day in data["days"])), [
                 (line["phrase"], line["url"] or "", plain(line["cost"]), *(

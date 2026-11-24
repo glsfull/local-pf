@@ -8,7 +8,7 @@
 python -m unittest discover -s tests -p test_dashboard.py -v
 ```
 
-Все 23 теста панели проходят. `DemoDataTest` проверяет, что демо заполняет все вкладки. Класс `TopPultInterfaceTest` проверяет:
+Все 28 тестов панели проходят. `DemoDataTest` проверяет, что демо заполняет все вкладки. Класс `TopPultInterfaceTest` проверяет:
 
 - шапку, подвал и список проектов с итогами; предупреждение и блокировку сбора
   при нулевом балансе;
@@ -19,6 +19,11 @@ python -m unittest discover -s tests -p test_dashboard.py -v
 - импорт CSV переходов с фильтрами брендовых и удалённых запросов;
 - данные графика, матрицу и CSV-экспорт позиций;
 - ежедневный автоматический сбор и пропуск редких низкочастотных фраз.
+- регрессии после ревью: CSV-экспорт переходов со всеми строками и защитой
+  от формул, отказ 422 на дату вне диапазона, перекластеризацию фраз без замера
+  за последний день, выключенный автосбор у проектов из старой базы, повтор
+  отложенного автосбора не чаще раза в 30 минут и пустую мощность без
+  подстановки 10.
 
 Тест `test_position_class_filter_and_js_agree` сравнивает Jinja-фильтр
 `position_class` с функцией `positionClass` из `dashboard/static/positions.js`
@@ -31,6 +36,14 @@ python -m unittest discover -s tests -p test_dashboard.py -v
 ```bash
 python -m examples.dashboard_demo --port 8091
 NODE_PATH="$(npm root -g)" node experiments/issue9_screenshots.js http://127.0.0.1:8091 docs/screenshots
+```
+
+Поведение формы в браузере проверяет `experiments/issue9_form_js.js`: скрытые
+поля своего региона отключаются и не блокируют отправку, а поле бренда
+перестаёт быть обязательным, когда заданы брендовые запросы.
+
+```bash
+NODE_PATH="$(npm root -g)" node experiments/issue9_form_js.js http://127.0.0.1:8091
 ```
 
 `tests/test_agent.py` в этом окружении не импортируется без DrissionPage.

@@ -129,7 +129,10 @@ if (regionSelect) {
     const option = regionSelect.selectedOptions[0];
     const isCustom = regionSelect.value === "custom";
     custom.hidden = !isCustom;
-    for (const input of custom.querySelectorAll("input")) input.required = isCustom;
+    for (const input of custom.querySelectorAll("input")) {
+      input.required = isCustom;
+      input.disabled = !isCustom;
+    }
     hint.textContent = isCustom
       ? "Позиции будут собираться по коду региона, указанному ниже."
       : `Позиции будут собираться из города: ${option.dataset.city}.`;
@@ -170,11 +173,14 @@ const keywords = document.querySelector("#keywords");
 const template = document.querySelector("#keyword-template");
 const addKeyword = document.querySelector("#add-keyword");
 
+const brandQueriesInput = document.querySelector("#brand-queries");
+
 function applyHintType(row) {
   const brand = row.querySelector("[data-brand]");
   const needsBrand = row.querySelector("select[name=hint_type]").value === "brand";
   brand.hidden = !needsBrand;
-  brand.querySelector("input").required = needsBrand;
+  // The first «Брендовые запросы» line is used when the row has no brand of its own.
+  brand.querySelector("input").required = needsBrand && !brandQueriesInput?.value.trim();
 }
 
 if (keywords && template && addKeyword) {
@@ -184,6 +190,9 @@ if (keywords && template && addKeyword) {
 
   keywords.addEventListener("change", (event) => {
     if (event.target.name === "hint_type") applyHintType(event.target.closest("[data-keyword]"));
+  });
+  brandQueriesInput?.addEventListener("input", () => {
+    for (const row of keywords.querySelectorAll("[data-keyword]")) applyHintType(row);
   });
 
   keywords.addEventListener("click", (event) => {

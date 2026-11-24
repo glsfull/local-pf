@@ -244,7 +244,7 @@ def read_visits(text):
             raise ValueError(f"Строка {index}: ожидается дата, запрос, выполнено, план, расход и глубина.")
         try:
             day = date.fromisoformat(values[0]) if "-" in values[0] else date(*map(int, reversed(values[0].split("."))))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             raise ValueError(f"Строка {index}: укажите дату в формате ГГГГ-ММ-ДД или ДД.ММ.ГГГГ.") from None
         phrase = values[1]
         if not 1 <= len(phrase) <= 399:

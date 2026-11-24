@@ -2,7 +2,7 @@
 // (mirrors the Jinja filter `position_class` in dashboard/__init__.py).
 function positionClass(rank) {
   const value = Number(rank);
-  if (!Number.isFinite(value) || value <= 0) return "";
+  if (rank === null || rank === undefined || !Number.isFinite(value) || value <= 0) return "outside";
   if (value <= 3) return "top-3";
   if (value <= 6) return "top-6";
   if (value <= 10) return "top-10";

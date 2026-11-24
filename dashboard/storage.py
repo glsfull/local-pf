@@ -207,7 +207,10 @@ def save_project(db, project_id, project, keywords, *, attributes=None):
 def project_settings(db, project_id):
     row = db.execute("SELECT * FROM project_settings WHERE project_id = ?", (project_id,)).fetchone()
     settings = dict(DEFAULT_SETTINGS)
-    if row is not None:
+    if row is None:
+        # Projects created before the settings table existed never asked for automatic collection.
+        settings["collect_daily"] = 0
+    else:
         settings.update({key: row[key] for key in DEFAULT_SETTINGS})
     if len(settings["schedule"]) != SCHEDULE_SLOTS:
         settings["schedule"] = DEFAULT_SETTINGS["schedule"]

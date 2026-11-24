@@ -575,10 +575,10 @@ class TopPultInterfaceTest(DashboardCase):
         self.assertEqual(self.client.get(project + "/export/runs.csv").status_code, 404)
 
     def test_position_class_filter_and_js_agree(self):
-        ranks = [1, 3, 4, 6, 7, 10, 11, 20, 21, 51]
+        ranks = [1, 3, 4, 6, 7, 10, 11, 20, 21, 51, None]
         python = [rank_tier(rank) for rank in ranks]
         self.assertEqual(python, ["top-3", "top-3", "top-6", "top-6", "top-10", "top-10", "top-20", "top-20",
-                                  "outside", "outside"])
+                                  "outside", "outside", "outside"])
         template = self.app.jinja_env.from_string("{{ 4|position_class }}")
         self.assertEqual(template.render(), "top-6")
         node = shutil.which("node")
@@ -636,6 +636,63 @@ class TopPultInterfaceTest(DashboardCase):
             ordinals = [row[0] for row in db.execute("SELECT ordinal FROM measurements WHERE run_id=?", (scheduled,))]
         self.assertEqual(ordinals, [1, 2, 3])
 
+
+    def test_visits_export_has_every_row_and_import_rejects_huge_dates(self):
+        project = self.create_project()
+        rows = [f"2026-11-24;Фраза {index};1;2;10" for index in range(20)]
+        self.assertEqual(self.import_visits(project, "\n".join([*rows, "2026-11-24;=HYPERLINK(1);1;1;1"])).status_code, 303)
+        self.assertIn("Показаны: 1 - 15 из 25", self.html(project + "/visits?deleted=1"))
+        exported = self.client.get(project + "/export/visits.csv?deleted=1&page=2").get_data(as_text=True)
+        self.assertEqual(len(exported.strip().splitlines()), 26)
+        self.assertIn("\n'=HYPERLINK(1);", exported)
+        self.assertEqual(self.import_visits(project, "01.01.99999999999999999999;Ремонт;1;1;1").status_code, 422)
+
+    def test_recluster_keeps_phrases_missing_from_the_latest_day(self):
+        project = self.create_project()
+        first = self.start_run(project)
+        with connect(self.path) as db:
+            db.execute("UPDATE measurements SET rank=3, found_url=?, checked_at='2026-11-23T10:00:00+03:00' "
+                       "WHERE run_id=? AND ordinal IN (0, 1)", (LANDING, first))
+            finish_run(db, first, "complete")
+        second = self.start_run(project)
+        with connect(self.path) as db:
+            db.execute("UPDATE measurements SET rank=2, found_url=?, checked_at='2026-11-24T10:00:00+03:00' "
+                       "WHERE run_id=? AND ordinal = 0", (LANDING, second))
+            finish_run(db, second, "complete")
+        self.post(project + "/clusters/recluster", {}, page=project)
+        with connect(self.path) as db:
+            clusters = [row[0] for row in db.execute(
+                "SELECT cluster FROM keyword_attributes WHERE ordinal IN (0, 1) ORDER BY ordinal")]
+        self.assertEqual(clusters, ["Натяжные потолки", "Натяжные потолки"])
+
+    def test_upgraded_projects_keep_daily_collection_off(self):
+        project_id = int(self.create_project().rsplit("/", 1)[1])
+        with connect(self.path) as db:
+            db.execute("DELETE FROM project_settings")
+            self.assertEqual(due_projects(db, datetime(2026, 11, 24, 22, 0, tzinfo=MSK)), [])
+        self.assertIn("Автосбор выключен", self.html(f"/projects/{project_id}/positions"))
+
+    def test_deferred_scheduled_run_waits_before_retrying(self):
+        project_id = int(self.create_project().rsplit("/", 1)[1])
+        with connect(self.path) as db:
+            db.execute("INSERT INTO panel_settings VALUES ('balance', '0')")
+        with patch("dashboard.Thread"), patch("dashboard.monotonic") as clock:
+            clock.return_value = 1000
+            self.assertIsNone(self.app.launch_run(project_id, scheduled=True))
+            with connect(self.path) as db:
+                db.execute("UPDATE panel_settings SET value = '100' WHERE key = 'balance'")
+            clock.return_value = 1060
+            self.assertIsNone(self.app.launch_run(project_id, scheduled=True))
+            clock.return_value = 1000 + 30 * 60
+            self.assertIsNotNone(self.app.launch_run(project_id, scheduled=True))
+
+    def test_keyword_power_is_not_prefilled(self):
+        project = self.create_project()
+        self.assertIn('name="power" inputmode="decimal" size="3" value="" placeholder="10"', self.html(project + "/keywords"))
+        self.post(project + "/keywords/0", {"power": "", "visits": "7"}, page=project)
+        with connect(self.path) as db:
+            self.assertEqual(tuple(db.execute("SELECT power, visits FROM keyword_attributes WHERE ordinal = 0").fetchone()),
+                             (None, 7))
 
 class DemoDataTest(unittest.TestCase):
     def test_demo_seed_fills_every_project_tab(self):
