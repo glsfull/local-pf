@@ -1,5 +1,53 @@
 # Отчёт о проверке local-pf
 
+## Проверка для PR №10
+
+На Linux с Python 3.15 и Chrome 155 прошли все 49 тестов:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Тестовый сервер воспроизводит разметку SmartCaptcha: чекбокс «Я не робот»
+(в том числе во фрейме с другого источника), задание с картинками после
+чекбокса и капчу с вводом текста. Тесты в `tests/test_agent.py`:
+
+- `test_checkbox_captcha_is_clicked_with_smooth_mouse_movement` — страница
+  получает не меньше 10 событий движения мыши и доверенный клик, после чего
+  проверка продолжается;
+- `test_checkbox_widget_inside_cross_origin_frame` — клик по чекбоксу внутри
+  фрейма виджета;
+- `test_image_captcha_is_solved_by_local_model` — скриншот области капчи,
+  ответ модели `examples/captcha_solver_fixed.py`, два клика и «Отправить»;
+- `test_wrong_model_answers_stop_after_three_attempts` — после трёх неудачных
+  попыток агент ждёт оператора и по истечении ожидания ставит `TIMEOUT`;
+- `test_complex_captcha_waits_for_operator_and_continues` — сложная капча сразу
+  передаётся оператору, `report.json` получает `CAPTCHA_MANUAL_REQUIRED`, после
+  решения в noVNC агент продолжает;
+- `test_operator_timeout_saves_report_and_exits` — код 1, `TIMEOUT` и
+  `captcha_encountered: true`;
+- `test_rank_parser_continues_after_operator_solves_captcha`,
+  `test_captcha_settings_from_environment` и `test_manual_wait_polls_until_timeout`.
+
+`tests/test_search_api.py` проверяет отложенные запросы Yandex Search API на
+поддельном API: отправку всех фраз до опроса, опрос операции, ошибки API,
+HTTP и XML, предел ожидания и запись позиций в SQLite без запуска Chromium.
+`test_logs_show_captcha_history_and_operator_request` проверяет блок «Капча»
+и ссылку на noVNC в разделе «Логи».
+
+Скриншоты раздела «Логи» сняты в Playwright по отчётам реальных прогонов
+агента против тестового сервера (`experiments/captcha_dashboard_reports.py`):
+ожидание оператора после трёх неверных ответов модели и капча, решённая
+оператором.
+
+![Ожидание оператора](docs/screenshots/issue-8-captcha-operator-waiting.png)
+![Капча решена оператором](docs/screenshots/issue-8-captcha-operator-solved.png)
+
+Живой Yandex Search API и настоящая SmartCaptcha на `ya.ru` в этой среде не
+проверялись: нет API-ключа, а капча на `ya.ru` появляется не при каждом
+запросе. Готовой свободной модели для заданий с картинками SmartCaptcha нет,
+поэтому такие капчи без подключённой модели решает оператор.
+
 ## Проверка для PR №7
 
 На Linux с Python 3.15 и Chrome 155 прошли все 32 теста:

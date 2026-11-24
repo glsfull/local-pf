@@ -81,6 +81,8 @@ tbody td { min-width: 83px; }
 tbody tr:hover { background: #f9fbff; }
 .secondary-line { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; font-size: 12px; }
 .url-cell { font-size: 13px; color: var(--muted); min-width: 150px; }
+.captcha-type { min-width: 170px; }
+.nowrap { white-space: nowrap; }
 .query-cell, .time-cell { min-width: 135px; }
 .status-cell { min-width: 120px; }
 .detail-cell { min-width: 160px; font-size: 13px; }

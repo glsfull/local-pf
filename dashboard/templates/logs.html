@@ -53,16 +53,16 @@
   </header>
   <div class="table-scroll" tabindex="0" role="region" aria-label="История капчи">
     <table>
-      <thead><tr><th>Дата и время (МСК)</th><th>Этап</th><th>Тип капчи</th><th>Попытка</th><th>Детали</th></tr></thead>
+      <thead><tr><th>Дата и время (МСК)</th><th>Этап</th><th>Тип капчи</th><th class="nowrap">Попытка</th><th>Детали</th></tr></thead>
       <tbody>
         {% for item in report.captcha.history %}
         <tr>
           <td class="time-cell">{{ item.timestamp_msk|display_date }}</td>
           <th scope="row">{{ captcha_steps.get(item.event, item.event) }}</th>
-          <td>{{ captcha_types.get(item.captcha_type, item.captcha_type or '—') }}</td>
+          <td class="captcha-type">{{ captcha_types.get(item.captcha_type, item.captcha_type or '—') }}</td>
           <td>{{ item.attempt or '—' }}</td>
           <td class="detail-cell">
-            {% if item.url %}<span class="url-cell">{{ item.url }}</span>{% endif %}
+            {% if item.url %}<a class="url-cell" href="{{ item.url }}" title="{{ item.url }}" target="_blank" rel="noopener">{{ item.url|truncate(70, True) }}</a>{% endif %}
             {% if item.waited_seconds is defined %}<span>Оператор решил за {{ item.waited_seconds }} с</span>{% endif %}
             {% if item.timeout_seconds is defined %}<span>Лимит ожидания {{ item.timeout_seconds }} с</span>{% endif %}
           </td>
