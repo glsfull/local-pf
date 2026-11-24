@@ -323,10 +323,11 @@ class PanelTest(DashboardCase):
         with (
             chdir(directory), patch("sys.argv", ["dashboard", "--agent-log-dir", str(directory)]),
             patch("dashboard.__main__.load_dotenv"), patch("flask.Flask.run", autospec=True, side_effect=capture),
-            patch("dashboard.__main__.start_scheduler") as scheduler,
+            patch("dashboard.__main__.start_scheduler") as scheduler, patch("dashboard.__main__.Timer") as timer,
         ):
             main()
         scheduler.assert_called_once()
+        timer.assert_called_once()
         with connect(directory / ".local-pf/dashboard.sqlite3") as db:
             for table in ("projects", "keywords", "runs", "measurements"):
                 self.assertEqual(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0)

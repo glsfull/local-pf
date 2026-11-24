@@ -11,6 +11,7 @@ import secrets
 import sqlite3
 from threading import Thread
 from time import monotonic
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 
@@ -82,6 +83,18 @@ def csv_response(name, header, rows):
         "﻿" + buffer.getvalue(), mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
     )
+
+
+def local_url(value):
+    """http(s) URL with a host, for example http://localhost:56565/ — the noVNC address of the agent."""
+    if len(value) > 2048 or re.search(r"[\s\x00-\x1f\x7f\\]", value):
+        return False
+    try:
+        parts = urlsplit(value)
+        parts.port
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 def mask_secret(value):
@@ -686,7 +699,7 @@ def create_app(
                     raise ValueError("YANDEX_FOLDER_ID: латинские буквы и цифры, до 50 символов.")
                 if wanted_source not in POSITION_SOURCES:
                     raise ValueError("Выберите источник позиций.")
-                if novnc and (not novnc.startswith(("http://", "https://")) or not validate_url(novnc)):
+                if novnc and not local_url(novnc):
                     raise ValueError("Адрес noVNC должен начинаться с http:// или https://.")
             except ValueError as exc:
                 error = str(exc)
