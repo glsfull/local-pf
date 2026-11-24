@@ -637,6 +637,28 @@ class TopPultInterfaceTest(DashboardCase):
         self.assertEqual(ordinals, [1, 2, 3])
 
 
+class DemoDataTest(unittest.TestCase):
+    def test_demo_seed_fills_every_project_tab(self):
+        from examples.dashboard_demo import demo_search, seed
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "demo.sqlite3"
+            app = create_app(path, demo_search, demo=True)
+            seed(path)
+            client = app.test_client()
+            self.assertIn("На балансе недостаточно средств", client.get("/").get_data(as_text=True))
+            for view in ("keywords", "clusters", "positions", "visits", "schedule", "expenses"):
+                with self.subTest(view=view):
+                    response = client.get(f"/projects/2/{view}")
+                    self.assertEqual(response.status_code, 200)
+            visits = client.get("/projects/2/visits?deleted=1").get_data(as_text=True)
+            self.assertIn("Потолки в ванную", visits)
+            self.assertIn("visit-miss", visits)
+            self.assertIn("visit-high", visits)
+            positions = client.get("/projects/2/positions").get_data(as_text=True)
+            self.assertEqual(positions.count("data-day="), 10)
+
+
 class SearchRankTest(unittest.TestCase):
     def test_variable_page_sizes_and_cutoff(self):
         read_page = Mock(side_effect=[[OTHER, MISMATCH], [OTHER, LANDING]])

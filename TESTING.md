@@ -1,5 +1,41 @@
 # Отчёт о проверке local-pf
 
+## Проверка для PR №11
+
+Интерфейс в стиле ТопПульт (issue №9) проверен на Linux с Python 3.15 и Node.js:
+
+```bash
+python -m unittest discover -s tests -p test_dashboard.py -v
+```
+
+Все 23 теста панели проходят. `DemoDataTest` проверяет, что демо заполняет все вкладки. Класс `TopPultInterfaceTest` проверяет:
+
+- шапку, подвал и список проектов с итогами; предупреждение и блокировку сбора
+  при нулевом балансе;
+- форму создания проекта с дополнительными настройками;
+- вкладки проекта и паузу;
+- редактирование мощности и переходов, а также «Авто-стратегию»;
+- дерево кластеров и перекластеризацию;
+- импорт CSV переходов с фильтрами брендовых и удалённых запросов;
+- данные графика, матрицу и CSV-экспорт позиций;
+- ежедневный автоматический сбор и пропуск редких низкочастотных фраз.
+
+Тест `test_position_class_filter_and_js_agree` сравнивает Jinja-фильтр
+`position_class` с функцией `positionClass` из `dashboard/static/positions.js`
+в Node.js.
+
+Скриншоты `docs/screenshots/issue9-*.jpg` сняты в Playwright Chromium
+(1440×900 и 390×844) по демо-данным. Консоль браузера ошибок не показала.
+Сценарий съёмки:
+
+```bash
+python -m examples.dashboard_demo --port 8091
+NODE_PATH="$(npm root -g)" node experiments/issue9_screenshots.js http://127.0.0.1:8091 docs/screenshots
+```
+
+`tests/test_agent.py` в этом окружении не импортируется без DrissionPage.
+На ветке `main` эта ошибка возникает так же.
+
 ## Проверка для PR №7
 
 На Linux с Python 3.15 и Chrome 155 прошли все 32 теста:

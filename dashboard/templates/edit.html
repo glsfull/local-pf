@@ -133,7 +133,7 @@
           <span class="field-label" id="not-found-label">Если сайт не нашелся по запросу</span>
           <div class="segmented choice" role="radiogroup" aria-labelledby="not-found-label" data-not-found>
             {% for key, label in not_found_modes.items() %}
-            <label><input type="radio" name="not_found" value="{{ key }}" {% if settings.not_found == key %}checked{% endif %}><span>{% if key == 'domain' %}{{ label }} <span data-zone>.{{ zone }}</span>{% else %}{{ label }}{% endif %}</span></label>
+            <label><input type="radio" name="not_found" value="{{ key }}" {% if settings.not_found == key %}checked{% endif %}><span>{% if key == 'domain' %}{{ label }}&nbsp;<span data-zone>.{{ zone }}</span>{% else %}{{ label }}{% endif %}</span></label>
             {% endfor %}
           </div>
           <div class="brand-queries" data-brand-queries {% if settings.not_found != 'brand' %}hidden{% endif %}>

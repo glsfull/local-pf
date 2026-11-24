@@ -158,7 +158,7 @@ select { appearance: none; padding-right: 36px; background-image: linear-gradien
 
 /* Segmented controls. */
 .segmented { display: inline-flex; border: 1px solid var(--border-color); border-radius: var(--radius-control); overflow: hidden; background: #fff; flex-wrap: wrap; }
-.segmented > a, .segmented > span, .segmented > button, .segmented.choice label span {
+.segmented > a, .segmented > span, .segmented > button, .segmented.choice label > span {
   display: inline-flex; align-items: center; min-height: 34px; padding: 0 14px; color: var(--text-main); border: 0;
   background: none; white-space: nowrap; cursor: pointer; font-weight: 500;
 }
@@ -170,7 +170,7 @@ select { appearance: none; padding-right: 36px; background-image: linear-gradien
 .segmented > .disabled { color: #94A3B8; cursor: not-allowed; }
 .segmented.choice { display: flex; width: 100%; }
 .segmented.choice label { flex: 1; display: flex; position: relative; }
-.segmented.choice label span { flex: 1; justify-content: center; text-align: center; white-space: normal; padding: 8px 12px; }
+.segmented.choice label > span { flex: 1; justify-content: center; text-align: center; white-space: normal; padding: 8px 12px; }
 .segmented.choice input { position: absolute; opacity: 0; pointer-events: none; }
 .segmented.choice input:focus-visible + span { outline: 2px solid var(--link-blue); outline-offset: -2px; }
 
@@ -423,4 +423,6 @@ tr.over-budget td, tr.over-budget th { background: var(--warning-bg); }
   .sticky-2 { left: 160px; }
   .sticky-3, .visits-matrix .sticky-2 { position: static; }
   .push-right { margin-left: 0; }
+  .name-cell { min-width: 170px; }
+  .name-cell small, .name-cell .muted { overflow-wrap: anywhere; }
 }
