@@ -339,3 +339,23 @@ for (const form of document.querySelectorAll("form[data-confirm]")) {
     if (!window.confirm(form.dataset.confirm)) event.preventDefault();
   });
 }
+
+// «Отметить все» for the phrases suggested by DeepSeek: only enabled (new) phrases are toggled.
+for (const master of document.querySelectorAll("input[data-check-all]")) {
+  const boxes = () => master.form.querySelectorAll(`input[name="${master.dataset.checkAll}"]:not(:disabled)`);
+  master.addEventListener("change", () => {
+    for (const box of boxes()) box.checked = master.checked;
+  });
+}
+
+// Long requests (DeepSeek) show progress and cannot be sent twice.
+for (const form of document.querySelectorAll("form[data-busy]")) {
+  form.addEventListener("submit", () => {
+    const button = form.querySelector("button[type=submit]");
+    if (!button) return;
+    window.setTimeout(() => {
+      button.disabled = true;
+      button.textContent = form.dataset.busy;
+    }, 0);
+  });
+}

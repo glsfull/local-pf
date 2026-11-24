@@ -441,3 +441,7 @@ tr.over-budget td, tr.over-budget th { background: var(--warning-bg); }
 .toolbar-form { display: inline-flex; gap: 8px; align-items: center; }
 @media (max-width: 860px) { .agent-grid { grid-template-columns: 1fr; } }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+
+/* «Сбор ядра (ИИ)» */
+.semantic-layout { max-width: 960px; }
+.prompt { white-space: pre-wrap; font-size: 13px; background: #F8FAFC; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin: 8px 0; }

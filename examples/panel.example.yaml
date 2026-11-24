@@ -22,6 +22,11 @@ settings:
   position_source: api
   # Адрес окна агента (noVNC) — ссылка «Окно агента (noVNC)» и решение капчи оператором.
   novnc_url: http://localhost:56565/
+  # Ключ DeepSeek для вкладки проекта «Сбор ядра (ИИ)» (https://platform.deepseek.com/api_keys).
+  # Пустое значение не стирает сохранённый ключ; вместо файла можно задать DEEPSEEK_API_KEY в .env.
+  deepseek_api_key: ""
+  # Модель DeepSeek: deepseek-flash (по умолчанию) или deepseek-v4-pro.
+  deepseek_model: deepseek-flash
 
 # Список ваших проектов. Пустой список — проекты добавляются в панели.
 projects: []

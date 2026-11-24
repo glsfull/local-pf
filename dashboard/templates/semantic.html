@@ -1,0 +1,74 @@
+{# «Сбор ядра (ИИ)»: semantic core collection with DeepSeek and the built-in prompt. #}
+{% if semantic_error %}<p class="alert error" role="alert">{{ semantic_error }}</p>{% endif %}
+{% if semantic_notice %}<p class="alert info" role="status">{{ semantic_notice }}</p>{% endif %}
+<div class="semantic-layout">
+  <section class="card stack" aria-labelledby="semantic-title">
+    <h2 id="semantic-title">Сбор семантического ядра · DeepSeek</h2>
+    {% if not has_deepseek_key %}
+    <p class="alert warning">Укажите DEEPSEEK_API_KEY в <a href="{{ url_for('settings') }}#deepseek">настройках панели</a> или в .env.</p>
+    {% endif %}
+    <p class="hint">Встроенный ИИ подбирает поисковые запросы для сайта <b>{{ project.url }}</b> (регион — {{ region }}) по вашим базовым фразам, группирует их в кластеры и определяет интент. Фразы попадают в проект только после того, как вы их отметите. Модель — <code>{{ deepseek_model }}</code>.</p>
+    <form method="post" action="{{ url_for('collect_semantic', project_id=project.id) }}" class="stack" data-busy="Собираю ядро — до 2 минут…">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="field">
+        <label class="field-label" for="semantic-seeds">Базовые фразы и тематика</label>
+        <textarea id="semantic-seeds" name="seeds" rows="4" maxlength="2000" required placeholder="Например: натяжные потолки, монтаж, матовые и глянцевые, Москва и область">{{ semantic_form.seeds }}</textarea>
+        <p class="hint">Товары и услуги сайта, по одной фразе в строке или описанием. Чем точнее тематика, тем меньше лишних запросов.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="semantic-count">Количество фраз</label>
+        <input id="semantic-count" name="count" inputmode="numeric" size="4" value="{{ semantic_form.count }}">
+        <p class="hint">От {{ min_count }} до {{ max_count }}. В проекте сейчас {{ keywords|length }} из {{ max_keywords }} фраз.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="semantic-extra">Дополнительные требования (необязательно)</label>
+        <textarea id="semantic-extra" name="extra" rows="2" maxlength="1000" placeholder="Например: без запросов «своими руками», больше коммерческих">{{ semantic_form.extra }}</textarea>
+      </div>
+      <details>
+        <summary>Встроенный промпт</summary>
+        <pre class="prompt">{{ system_prompt }}</pre>
+        <p class="hint">К промпту добавляются сайт, регион, базовые фразы, количество и дополнительные требования. Ответ — JSON со списком фраз, кластеров и интентов.</p>
+      </details>
+      <div><button class="button primary" type="submit" {{ 'disabled' if not has_deepseek_key }}>🤖 Собрать ядро</button></div>
+    </form>
+  </section>
+  {% if collected %}
+  <section class="card stack" aria-labelledby="semantic-result">
+    <h2 id="semantic-result">Результат от {{ collected.created_at|display_date }} · {{ collected.keywords|length }} фраз</h2>
+    <p class="hint">Модель <code>{{ collected.model }}</code>{% if collected.usage.total_tokens %}, токенов: {{ collected.usage.total_tokens }}{% endif %}. Уточнение для новых фраз (если сайт не найден в топ-50) берётся из настроек проекта: {{ 'бренд' if settings.not_found == 'brand' else 'домен без зоны' }}.</p>
+    <form method="post" action="{{ url_for('add_semantic', project_id=project.id, run_id=collected.id) }}" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Фразы от DeepSeek">
+        <table class="data-table compact">
+          <thead><tr>
+            <th><label class="check-label"><input type="checkbox" data-check-all="pick" aria-label="Отметить все новые фразы"></label></th>
+            <th>Фраза</th><th>Кластер</th><th>Интент</th>
+          </tr></thead>
+          <tbody>
+          {% for word in collected.keywords %}
+            {% set present = word.phrase|lower in existing_phrases %}
+            <tr>
+              <td><input type="checkbox" name="pick" value="{{ loop.index0 }}" id="pick-{{ loop.index0 }}" {{ 'disabled' if present }}></td>
+              <th scope="row"><label for="pick-{{ loop.index0 }}">{{ word.phrase }}</label>{% if present %} <span class="muted">· уже в проекте</span>{% endif %}</th>
+              <td>{{ word.cluster or '—' }}</td>
+              <td>{{ intents.get(word.intent, '—') }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div><button class="button primary" type="submit">Добавить отмеченные в проект</button></div>
+    </form>
+  </section>
+  {% endif %}
+  {% if semantic_history|length > 1 %}
+  <section class="card">
+    <h2>Предыдущие сборы</h2>
+    <ul>
+    {% for item in semantic_history %}
+      <li><a href="{{ url_for('project', project_id=project.id, view='semantic', semantic=item.id) }}" {% if collected and item.id == collected.id %}aria-current="true"{% endif %}>{{ item.created_at|display_date }}</a> · {{ item.model }} · {{ item.found }} фраз</li>
+    {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+</div>

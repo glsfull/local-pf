@@ -44,6 +44,21 @@
         {% if env_folder and not values.yandex_folder_id %}<p class="hint">Используется YANDEX_FOLDER_ID из .env.</p>{% endif %}
       </div>
     </fieldset>
+    <fieldset class="settings-group stack" id="deepseek">
+      <legend>ИИ · DeepSeek — сбор семантического ядра</legend>
+      <div class="field">
+        <label class="field-label" for="deepseek-api-key">DEEPSEEK_API_KEY</label>
+        <input id="deepseek-api-key" name="deepseek_api_key" type="password" autocomplete="off" maxlength="200" placeholder="{{ 'Оставьте пустым, чтобы не менять ключ' if has_deepseek_key else 'sk-…' }}">
+        <p class="hint" id="deepseek-key-state">{{ deepseek_state }} Ключ создаётся на <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com</a>; сбор ядра — вкладка проекта «Сбор ядра (ИИ)».</p>
+        {% if has_deepseek_key %}<label class="check-label"><input type="checkbox" name="clear_deepseek_key" value="1"> Удалить сохранённый ключ DeepSeek</label>{% endif %}
+      </div>
+      <div class="field">
+        <label class="field-label" for="deepseek-model">Модель</label>
+        <input id="deepseek-model" name="deepseek_model" value="{{ values.deepseek_model }}" maxlength="64" list="deepseek-models">
+        <datalist id="deepseek-models">{% for model in deepseek_models %}<option value="{{ model }}">{% endfor %}</datalist>
+        <p class="hint">{{ deepseek_models|join(' — быстрая и дешёвая, ') }} — точнее. Можно указать другую модель из документации DeepSeek.</p>
+      </div>
+    </fieldset>
     <fieldset class="settings-group stack">
       <legend>Агент в контейнере dp-agent</legend>
       <div class="field">

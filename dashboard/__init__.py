@@ -17,7 +17,7 @@ from modules.clock import MSK, timestamp
 from modules.journal import Journal
 
 from .forms import (
-    COMPETITION, FREQUENCY_TYPES, NOT_FOUND_MODES, QUERY_REGIONS, REGIONS, SCHEDULE_MODES, THEMES, WEEKDAYS,
+    COMPETITION, FREQUENCY_TYPES, MAX_KEYWORDS, NOT_FOUND_MODES, QUERY_REGIONS, REGIONS, SCHEDULE_MODES, THEMES, WEEKDAYS,
     brand_list, optional_number, position_region, read_project, read_schedule_settings, read_settings,
     read_visits, region_label, validate_project, validate_url,
 )
@@ -31,7 +31,7 @@ from .storage import (
     project_keywords, project_settings, save_panel_setting, save_project, save_project_settings, start_agent_session,
     start_run,
 )
-from . import identities, views
+from . import deepseek, identities, semantic, views
 
 BRAND = "ТопПульт"
 RUN_STATES = {
@@ -41,7 +41,7 @@ RUN_STATES = {
     "interrupted": "Прервана",
 }
 PROJECT_TABS = (
-    ("keywords", "Ключевики"), ("clusters", "Кластеры"), ("positions", "Позиции"), ("visits", "Переходы"),
+    ("keywords", "Ключевики"), ("semantic", "Сбор ядра (ИИ)"), ("clusters", "Кластеры"), ("positions", "Позиции"), ("visits", "Переходы"),
     ("schedule", "Расписание"), ("expenses", "Расходы"), ("settings", "Настройки"),
 )
 EXPORTS = ("keywords", "clusters", "positions", "visits")
@@ -88,7 +88,7 @@ def mask_secret(value):
 
 def create_app(
     path, search_page=None, *, report_path=None, agent_runner=None, agent_session_runner=None,
-    api_factory=YandexDeferredSearch,
+    api_factory=YandexDeferredSearch, deepseek_factory=deepseek.DeepSeekClient,
 ):
     app = Flask(__name__)
     app.config.update(
@@ -102,6 +102,8 @@ def create_app(
         report_path = Path(report_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     initialize(path)
+    with connect(path) as db:
+        semantic.initialize(db)
     browser_source = "Парсер выдачи"
     browser_configured = agent_runner is not None or search_page is not None
 
@@ -123,6 +125,11 @@ def create_app(
         if wanted == "api" and not browser_configured:
             return API_SOURCE, False
         return browser_source, False
+
+    def deepseek_settings(db):
+        """DEEPSEEK_API_KEY from the panel settings with the environment as a fallback, and the model."""
+        key = panel_setting(db, "deepseek_api_key") or os.getenv("DEEPSEEK_API_KEY", "")
+        return key.strip(), panel_setting(db, "deepseek_model") or deepseek.DEFAULT_MODEL
 
     def novnc_url(db):
         return panel_setting(db, "novnc_url") or os.getenv("LOCAL_PF_NOVNC_URL", DEFAULT_NOVNC_URL)
@@ -380,7 +387,7 @@ def create_app(
         ), 422 if error else 200
 
     @app.get("/projects/<int:project_id>")
-    @app.get("/projects/<int:project_id>/<any(keywords,clusters,positions,visits,schedule,expenses):view>")
+    @app.get("/projects/<int:project_id>/<any(keywords,semantic,clusters,positions,visits,schedule,expenses):view>")
     @app.get("/projects/<int:project_id>/runs/<int:run_id>")
     def project(project_id, run_id=None, view="positions"):
         today = today_msk()
@@ -454,12 +461,82 @@ def create_app(
                 context.update(expense_rows=expense_rows, expense_totals=expense_totals)
             elif view == "schedule":
                 context.update(schedule_modes=SCHEDULE_MODES, weekdays=WEEKDAYS)
+            elif view == "semantic":
+                key, model = deepseek_settings(db)
+                collected = semantic.latest_run(db, project_id, request.args.get("semantic", type=int))
+                form = session.pop("semantic_form", None) or (
+                    {"seeds": collected["seeds"], "extra": collected["extra"], "count": collected["count"]}
+                    if collected else {"seeds": "", "extra": "", "count": deepseek.DEFAULT_COUNT}
+                )
+                context.update(
+                    collected=collected, semantic_history=semantic.run_history(db, project_id),
+                    has_deepseek_key=bool(key), deepseek_model=model, semantic_form=form,
+                    system_prompt=deepseek.SYSTEM_PROMPT, intents=deepseek.INTENTS,
+                    existing_phrases={word["phrase"].casefold() for word in words},
+                    semantic_error=session.pop("semantic_error", None),
+                    semantic_notice=session.pop("semantic_notice", None),
+                    min_count=deepseek.MIN_COUNT, max_count=deepseek.MAX_COUNT, max_keywords=MAX_KEYWORDS,
+                )
         return render_template(
             "project.html", project=item, keywords=words, domain=domain_hint(item["url"]), settings=settings,
             runs=runs, run=run, active=active, view=view, notices=views.warnings(balance, words),
             low_balance=balance is not None and balance <= 0, region=region_label(item["region"], item["region_name"]),
             position_city=position_region(item["region"]), **context,
         )
+
+    def semantic_page(project_id, run_id=None):
+        return redirect(url_for("project", project_id=project_id, view="semantic", semantic=run_id), code=303)
+
+    @app.post("/projects/<int:project_id>/semantic")
+    def collect_semantic(project_id):
+        """Ask DeepSeek for the semantic core with the built-in prompt and keep the answer for review."""
+        with connect(path) as db:
+            item = get_project(db, project_id)
+            key, model = deepseek_settings(db)
+        try:
+            form = deepseek.read_request(request.form)
+            if not key:
+                raise deepseek.DeepSeekError("Укажите DEEPSEEK_API_KEY в настройках панели.")
+            client = deepseek_factory(key, model)
+            keywords, usage, _ = client.collect(
+                site_host(item["url"]) or item["url"], form["seeds"], region_label(item["region"], item["region_name"]),
+                form["count"], form["extra"],
+            )
+        except (ValueError, deepseek.DeepSeekError) as exc:
+            logger.info("Сбор ядра DeepSeek для проекта %s: %s", project_id, exc)
+            session["semantic_error"] = str(exc)
+            session["semantic_form"] = {name: request.form.get(name, "")[:2000] for name in ("seeds", "extra", "count")}
+            return semantic_page(project_id)
+        with connect(path) as db:
+            run_id = semantic.save_run(db, project_id, model, form, keywords, usage)
+        session["semantic_notice"] = f"DeepSeek ({model}) предложил фраз: {len(keywords)}. Отметьте нужные и добавьте в проект."
+        return semantic_page(project_id, run_id)
+
+    @app.post("/projects/<int:project_id>/semantic/<int:run_id>/add")
+    def add_semantic(project_id, run_id):
+        with connect(path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            item = get_project(db, project_id)
+            collected = semantic.latest_run(db, project_id, run_id)
+            if collected is None:
+                abort(404)
+            picks = {int(value) for value in request.form.getlist("pick") if value.isdigit()}
+            chosen = [word for index, word in enumerate(collected["keywords"]) if index in picks]
+            if not chosen:
+                session["semantic_error"] = "Отметьте фразы, которые нужно добавить в проект."
+                return semantic_page(project_id, run_id)
+            try:
+                added, existing, over = semantic.append_keywords(db, item, chosen)
+            except ValueError as exc:
+                session["semantic_error"] = str(exc)
+                return semantic_page(project_id, run_id)
+        notice = f"Добавлено фраз в проект: {added}."
+        if existing:
+            notice += f" Уже были в проекте: {existing}."
+        if over:
+            notice += f" Не добавлено из-за лимита {MAX_KEYWORDS} фраз на проект: {over}."
+        session["semantic_notice"] = notice
+        return semantic_page(project_id, run_id)
 
     @app.post("/projects/<int:project_id>/pause")
     def toggle_pause(project_id):
@@ -671,6 +748,14 @@ def create_app(
             saved_key = panel_setting(db, "yandex_api_key", "")
             env_key, env_folder = os.getenv("YANDEX_API_KEY", ""), os.getenv("YANDEX_FOLDER_ID", "")
             profiles, proxies = identities.list_profiles(db), identities.list_proxies(db)
+            saved_deepseek = panel_setting(db, "deepseek_api_key", "")
+            values["deepseek_model"] = panel_setting(db, "deepseek_model", "") or deepseek.DEFAULT_MODEL
+        env_deepseek = os.getenv("DEEPSEEK_API_KEY", "")
+        deepseek_state = (
+            f"Ключ сохранён в панели: {mask_secret(saved_deepseek)}." if saved_deepseek
+            else f"Используется DEEPSEEK_API_KEY из .env: {mask_secret(env_deepseek)}." if env_deepseek
+            else "Ключ не задан."
+        )
         if values["balance"]:
             values["balance"] = metric(float(values["balance"])).replace(" ", "")
         key_state = (
@@ -684,6 +769,7 @@ def create_app(
             position_sources=POSITION_SOURCES, day_price=DAY_PRICE, night_price=NIGHT_PRICE,
             browser_configured=browser_configured, profiles=profiles, proxies=proxies,
             max_profiles=identities.MAX_PROFILES, max_proxies=identities.MAX_PROXIES,
+            deepseek_state=deepseek_state, has_deepseek_key=bool(saved_deepseek), deepseek_models=deepseek.MODELS,
         ), status
 
     @app.route("/settings", methods=["GET", "POST"])
@@ -709,6 +795,8 @@ def create_app(
                 # An empty key field keeps the saved key: the key is never sent back to the browser.
                 if request.form.get("clear_api_key"):
                     save_panel_setting(db, "yandex_api_key", "")
+                if request.form.get("clear_deepseek_key"):
+                    save_panel_setting(db, "deepseek_api_key", "")
                 save_connection(db, connection)
             return redirect(url_for("settings"), code=303)
         return render_settings()
