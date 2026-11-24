@@ -1,0 +1,30 @@
+{# Schedule controls shared by the project form and the «Расписание» tab. Expects `settings`, `schedule_modes`, `weekdays`. #}
+<div class="field">
+  <label class="field-label" for="schedule-mode">Расписание</label>
+  <select id="schedule-mode" name="schedule_mode" data-schedule-mode>
+    {% for key, label in schedule_modes.items() %}<option value="{{ key }}" {% if settings.schedule_mode == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <p class="hint">Переходы распределяются по выбранным часам и дням недели, МСК.</p>
+  <div class="schedule-grid" data-schedule-grid {% if settings.schedule_mode == 'uniform_day' %}hidden{% endif %}>
+    <div class="schedule-tools">
+      <button type="button" class="link-action" data-schedule-all="1">Выбрать все</button>
+      <button type="button" class="link-action" data-schedule-all="0">Снять все</button>
+    </div>
+    <div class="table-scroll" tabindex="0" role="region" aria-label="Часы переходов">
+      <table class="schedule-table">
+        <thead><tr><th><span class="visually-hidden">День</span></th>{% for hour in range(24) %}<th scope="col">{{ '%02d'|format(hour) }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for day in weekdays %}
+          {% set day_index = loop.index0 %}
+          <tr>
+            <th scope="row">{{ day }}</th>
+            {% for hour in range(24) %}
+            <td><label class="slot"><input type="checkbox" name="schedule" value="{{ day_index }}-{{ hour }}" {% if settings.schedule[day_index * 24 + hour] == '1' %}checked{% endif %}><span class="visually-hidden">{{ day }} {{ hour }}:00</span></label></td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

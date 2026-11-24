@@ -3,38 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}{% endblock %} · local-pf</title>
+  <title>{% block title %}{% endblock %} · {{ brand }}</title>
   <link rel="icon" href="{{ url_for('static', filename='mark.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='panel.css') }}">
+  {% block head %}{% endblock %}
+  <script defer src="{{ url_for('static', filename='positions.js') }}"></script>
   <script defer src="{{ url_for('static', filename='panel.js') }}"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">К содержимому</a>
-  <aside class="sidebar">
-    <a class="logo" href="{{ url_for('projects') }}">
-      <img src="{{ url_for('static', filename='mark.svg') }}" alt="" width="35" height="35">
-      <span>local-pf<small>Мониторинг позиций</small></span>
-    </a>
-    <nav aria-label="Основная навигация">
-      <a href="{{ url_for('projects') }}" {% if request.endpoint in ('projects', 'project', 'edit_project') %}aria-current="{{ 'page' if request.endpoint == 'projects' else 'true' }}"{% endif %}>
-        <span class="nav-icon grid-icon" aria-hidden="true"></span> Проекты
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="{{ url_for('projects') }}" aria-label="{{ brand }} — мои проекты">
+        <img src="{{ url_for('static', filename='mark.svg') }}" alt="" width="28" height="28">
+        <span>Топ<b>Пульт</b></span>
       </a>
-      {% if agent_logs_enabled %}
-      <a href="{{ url_for('agent_logs') }}" {% if request.endpoint == 'agent_logs' %}aria-current="page"{% endif %}>
-        <span class="nav-icon logs-icon" aria-hidden="true"></span> Логи
-      </a>
-      {% endif %}
-      <a href="{{ url_for('settings') }}" {% if request.endpoint == 'settings' %}aria-current="page"{% endif %}>
-        <span class="nav-icon settings-icon" aria-hidden="true"></span> Настройки
-      </a>
-    </nav>
-    <a class="provider" href="{{ url_for('settings') }}">
-      <span class="provider-dot {{ 'ready' if configured else '' }}" aria-hidden="true"></span>
-      <span>{{ source }}<small>{{ 'Локальный пример' if demo else ('Chromium · noVNC' if configured else 'Требуется подключение') }}</small></span>
-    </a>
-  </aside>
-  <main id="main">
+      <nav class="topnav" aria-label="Основная навигация">
+        <a href="{{ url_for('projects') }}" {% if request.endpoint in ('projects', 'project', 'edit_project') %}aria-current="page"{% endif %}>Мои проекты</a>
+        <details class="dropdown" data-dropdown>
+          <summary>Инструменты <span class="chevron" aria-hidden="true"></span></summary>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('edit_project') }}">Создать проект</a>
+            {% if agent_logs_enabled %}<a href="{{ url_for('agent_logs') }}">Логи агента</a>{% endif %}
+            <a href="{{ url_for('settings') }}">Настройки панели</a>
+          </div>
+        </details>
+        <details class="dropdown" data-dropdown>
+          <summary>Помощь <span class="chevron" aria-hidden="true"></span></summary>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('help_page') }}#docs">Документация</a>
+            <a href="{{ url_for('help_page') }}#telegram">Телеграм-группа</a>
+            <a href="{{ url_for('help_page') }}#offer">Оферта</a>
+            <a href="{{ url_for('help_page') }}#privacy">Приватность</a>
+          </div>
+        </details>
+      </nav>
+      <div class="topbar-user">
+        <a class="balance" href="{{ url_for('settings') }}" title="Баланс панели">
+          <span class="coin" aria-hidden="true">₽</span>{{ (balance|metric(' ₽')) if balance is not none else '— ₽' }}
+        </a>
+        <details class="dropdown align-end" data-dropdown>
+          <summary class="user"><span class="avatar" aria-hidden="true">{{ user_name[:1]|upper }}</span><span class="user-name">{{ user_name }}</span> <span class="chevron" aria-hidden="true"></span></summary>
+          <div class="dropdown-menu">
+            <p class="dropdown-note"><span class="provider-dot {{ 'ready' if configured else '' }}" aria-hidden="true"></span>{{ source }} · {{ 'локальный пример' if demo else ('Chromium · noVNC' if configured else 'требуется подключение') }}</p>
+            <a href="{{ url_for('settings') }}">Настройки панели</a>
+            {% if agent_logs_enabled %}<a href="{{ url_for('agent_logs') }}">Логи агента</a>{% endif %}
+          </div>
+        </details>
+      </div>
+    </div>
+  </header>
+  {% block subheader %}{% endblock %}
+  <main id="main" class="{% block main_class %}page{% endblock %}">
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>© {{ brand }}, {{ year }}. Все права защищены</span>
+      <nav aria-label="Документы">
+        <a href="{{ url_for('help_page') }}#docs">Документация</a>
+        <a href="{{ url_for('help_page') }}#telegram">Телеграм-группа</a>
+        <a href="{{ url_for('help_page') }}#offer">Оферта</a>
+        <a href="{{ url_for('help_page') }}#privacy">Приватность</a>
+      </nav>
+    </div>
+  </footer>
 </body>
 </html>

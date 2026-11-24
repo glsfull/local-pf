@@ -1,0 +1,23 @@
+{# Sub-header and tabs shared by every project screen. Expects `status_project` and `view`. #}
+<div class="project-bar">
+  <div class="project-bar-inner">
+    <div class="project-title">
+      <h1>{{ status_project.url|replace('https://', '')|replace('http://', '')|trim('/') }}</h1>
+      {% if settings.paused %}<span class="pill stopped">Остановлен</span>{% else %}<span class="pill running">Запущен</span>{% endif %}
+      <form method="post" action="{{ url_for('toggle_pause', project_id=status_project.id) }}">
+        <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="return_to" value="{{ request.full_path.rstrip('?') }}">
+        <button class="button outline small" type="submit">
+          {% if settings.paused %}<span aria-hidden="true">▶</span> Запустить{% else %}<span aria-hidden="true">⏸</span> Остановить{% endif %}
+        </button>
+      </form>
+    </div>
+    <a class="back-link" href="{{ url_for('projects') }}"><span aria-hidden="true">↺</span> Вернуться к списку проектов</a>
+  </div>
+  <nav class="tabs" aria-label="Разделы проекта">
+    {% for key, label in project_tabs %}
+    <a href="{{ url_for('edit_project', project_id=status_project.id) if key == 'settings' else url_for('project', project_id=status_project.id, view=key) }}"
+       {% if view == key %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+</div>

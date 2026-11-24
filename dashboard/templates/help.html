@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Помощь{% endblock %}
+{% block content %}
+<div class="narrow help">
+  <header class="page-header">
+    <div class="title-row"><h1>Помощь</h1></div>
+    <a class="back-link" href="{{ url_for('projects') }}"><span aria-hidden="true">↺</span> Вернуться к списку проектов</a>
+  </header>
+  <section class="card" id="docs">
+    <h2>Документация</h2>
+    <ol>
+      <li>Создайте проект: адрес сайта, регион продвижения и ключевики.</li>
+      <li>На вкладке «Позиции» запустите сбор позиций или включите ежедневный автоматический сбор.</li>
+      <li>Загрузите статистику переходов в CSV на вкладке «Переходы» — по ней строятся «Расходы» и колонки «Переходов сегодня» и «Расход сегодня».</li>
+      <li>Сгруппируйте ключевики на вкладке «Кластеры» кнопкой «Перекластеризовать».</li>
+    </ol>
+    <p class="muted">Подробности о запуске и проверке — в файлах README.md и TESTING.md репозитория.</p>
+  </section>
+  <section class="card" id="telegram">
+    <h2>Телеграм-группа</h2>
+    {% if telegram %}<p><a href="{{ telegram }}" rel="noopener noreferrer" target="_blank">{{ telegram }}</a></p>
+    {% else %}<p class="muted">Ссылка не задана. Добавьте её в <a href="{{ url_for('settings') }}">настройках панели</a>.</p>{% endif %}
+  </section>
+  <section class="card" id="offer">
+    <h2>Оферта</h2>
+    <p>Панель работает локально и не принимает платежи. Баланс в шапке — справочное значение из настроек панели.</p>
+  </section>
+  <section class="card" id="privacy">
+    <h2>Приватность</h2>
+    <p>Проекты, позиции и статистика хранятся только в локальной базе SQLite. Панель не отправляет данные на сторонние серверы; браузерный агент открывает только страницы поисковой выдачи.</p>
+  </section>
+</div>
+{% endblock %}

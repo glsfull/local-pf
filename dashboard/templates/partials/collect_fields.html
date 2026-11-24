@@ -1,0 +1,18 @@
+{# Position collection toggles shared by the project form and the «Расписание» tab. #}
+<div class="field">
+  <span class="field-label">Как собирать позиции</span>
+  <p class="alert peach"><span aria-hidden="true">⚠</span> Временно доступна только лайв-выдача — собираем её.</p>
+</div>
+<label class="toggle">
+  <input type="checkbox" name="collect_daily" value="1" {% if settings.collect_daily %}checked{% endif %}>
+  <span class="toggle-track" aria-hidden="true"></span>
+  <span>Собирать позиции ежедневно автоматически <span class="info" title="Панель запустит проверку один раз в день в указанное время, если она открыта">ⓘ</span></span>
+</label>
+<label class="field inline-field">Время сбора, МСК
+  <input type="time" name="collect_time" value="{{ settings.collect_time }}" required>
+</label>
+<label class="toggle">
+  <input type="checkbox" name="rare_lowfreq" value="1" {% if settings.rare_lowfreq %}checked{% endif %}>
+  <span class="toggle-track" aria-hidden="true"></span>
+  <span>Планировать низкочастотники реже чем раз в день <span class="info" title="Запросы с частотностью меньше 10 проверяются раз в 3 дня">ⓘ</span></span>
+</label>

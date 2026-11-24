@@ -85,7 +85,43 @@ CREATE TABLE IF NOT EXISTS cluster_attributes (
     has_text INTEGER,
     PRIMARY KEY (project_id, name)
 );
+CREATE TABLE IF NOT EXISTS project_settings (
+    project_id INTEGER PRIMARY KEY REFERENCES projects(id),
+    query_region TEXT NOT NULL DEFAULT 'cities',
+    frequency_type TEXT NOT NULL DEFAULT 'exact',
+    theme TEXT NOT NULL DEFAULT '',
+    schedule_mode TEXT NOT NULL DEFAULT 'uniform_day',
+    schedule TEXT NOT NULL DEFAULT '',
+    not_found TEXT NOT NULL DEFAULT 'domain',
+    brand_queries TEXT NOT NULL DEFAULT '',
+    limit_budget INTEGER NOT NULL DEFAULT 0,
+    daily_budget REAL,
+    collect_daily INTEGER NOT NULL DEFAULT 1,
+    collect_time TEXT NOT NULL DEFAULT '21:00',
+    rare_lowfreq INTEGER NOT NULL DEFAULT 0,
+    paused INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS visit_stats (
+    project_id INTEGER NOT NULL REFERENCES projects(id),
+    phrase TEXT NOT NULL,
+    day TEXT NOT NULL,
+    done INTEGER NOT NULL,
+    planned INTEGER NOT NULL,
+    cost REAL NOT NULL,
+    depth REAL,
+    PRIMARY KEY (project_id, phrase, day)
+);
+CREATE TABLE IF NOT EXISTS panel_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
+SCHEDULE_SLOTS = 7 * 24
+DEFAULT_SETTINGS = {
+    "query_region": "cities", "frequency_type": "exact", "theme": "", "schedule_mode": "uniform_day",
+    "schedule": "1" * SCHEDULE_SLOTS, "not_found": "domain", "brand_queries": "", "limit_budget": 0,
+    "daily_budget": None, "collect_daily": 1, "collect_time": "21:00", "rare_lowfreq": 0, "paused": 0,
+}
 
 
 @contextmanager
@@ -168,11 +204,48 @@ def save_project(db, project_id, project, keywords, *, attributes=None):
     return project_id
 
 
-def start_run(db, project, keywords, source, domain):
+def project_settings(db, project_id):
+    row = db.execute("SELECT * FROM project_settings WHERE project_id = ?", (project_id,)).fetchone()
+    settings = dict(DEFAULT_SETTINGS)
+    if row is None:
+        # Projects created before the settings table existed never asked for automatic collection.
+        settings["collect_daily"] = 0
+    else:
+        settings.update({key: row[key] for key in DEFAULT_SETTINGS})
+    if len(settings["schedule"]) != SCHEDULE_SLOTS:
+        settings["schedule"] = DEFAULT_SETTINGS["schedule"]
+    return settings
+
+
+def save_project_settings(db, project_id, settings):
+    columns = tuple(DEFAULT_SETTINGS)
+    values = {**project_settings(db, project_id), **settings}
+    db.execute(
+        f"""INSERT INTO project_settings(project_id, {', '.join(columns)})
+            VALUES (?, {', '.join('?' for _ in columns)})
+            ON CONFLICT(project_id) DO UPDATE SET {', '.join(f'{c}=excluded.{c}' for c in columns)}""",
+        (project_id, *(values[column] for column in columns)),
+    )
+
+
+def panel_setting(db, key, default=None):
+    row = db.execute("SELECT value FROM panel_settings WHERE key = ?", (key,)).fetchone()
+    return default if row is None or row["value"] is None else row["value"]
+
+
+def save_panel_setting(db, key, value):
+    db.execute(
+        "INSERT INTO panel_settings VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (key, value),
+    )
+
+
+def start_run(db, project, keywords, source, domain, *, region=None):
     run_id = db.execute(
         """INSERT INTO runs(project_id, project_url, interval_seconds, region, source, state, started_at)
         VALUES (?, ?, ?, ?, ?, 'running', ?)""",
-        (project["id"], project["url"], project["interval_seconds"], project["region"], source, timestamp()),
+        (project["id"], project["url"], project["interval_seconds"],
+         project["region"] if region is None else region, source, timestamp()),
     ).lastrowid
     frequencies = dict(db.execute(
         "SELECT ordinal, iw FROM keyword_attributes WHERE project_id = ?", (project["id"],),

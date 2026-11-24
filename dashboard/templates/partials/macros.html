@@ -1,0 +1,53 @@
+{% macro pagination_bar(pagination, label='Показаны') %}
+{% set args = request.args.to_dict() %}
+<nav class="pagination" aria-label="Страницы">
+  <div class="pages">
+    {% if pagination.page > 1 %}<a href="{{ url_for(request.endpoint, **dict(request.view_args, **dict(args, page=pagination.page - 1))) }}" aria-label="Предыдущая страница">←</a>{% else %}<span class="disabled" aria-hidden="true">←</span>{% endif %}
+    {% for number in range(1, pagination.pages + 1) %}
+    {% if number == pagination.page %}<span class="current" aria-current="page">{{ number }}</span>
+    {% elif number <= 2 or number > pagination.pages - 2 or (number - pagination.page)|abs <= 1 %}<a href="{{ url_for(request.endpoint, **dict(request.view_args, **dict(args, page=number))) }}">{{ number }}</a>
+    {% elif (number - pagination.page)|abs == 2 %}<span class="gap">…</span>{% endif %}
+    {% endfor %}
+    {% if pagination.page < pagination.pages %}<a href="{{ url_for(request.endpoint, **dict(request.view_args, **dict(args, page=pagination.page + 1))) }}" aria-label="Следующая страница">→</a>{% else %}<span class="disabled" aria-hidden="true">→</span>{% endif %}
+  </div>
+  <form method="get" class="per-page" data-autosubmit>
+    {% for key, value in args.items() if key not in ('per_page', 'page') %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+    <label><span class="visually-hidden">Строк на странице</span>
+      <select name="per_page">
+        {% for size in (15, 30, 50, 100) %}<option value="{{ size }}" {% if size == pagination.per_page %}selected{% endif %}>По {{ size }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button class="button small" type="submit">Показать</button></noscript>
+  </form>
+  <span class="muted">{{ label }}: {{ pagination.first }} - {{ pagination.last }} из {{ pagination.total }}</span>
+</nav>
+{% endmacro %}
+
+{% macro info(text) %}<span class="info" tabindex="0" title="{{ text }}" aria-label="{{ text }}">ⓘ</span>{% endmacro %}
+
+{% macro notices_box(notices) %}
+{% if notices %}
+<details class="attention" open>
+  <summary>Обратите внимание ({{ notices|length }})</summary>
+  <ul>
+    {% for title, text in notices %}<li><span class="attention-mark" aria-hidden="true">❗</span><b>{{ title }}</b> {{ text }}</li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endmacro %}
+
+{% macro period_filters(project, view, period, since, until, extra={}) %}
+<form method="get" class="filters" data-autosubmit>
+  <div class="segmented" role="group" aria-label="Период">
+    {% for key, label in [('14', '2 недели'), ('30', 'Месяц')] %}
+    <a href="{{ url_for('project', project_id=project.id, view=view, period=key, **extra) }}" {% if period == key %}aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  <label class="date-range"><span class="visually-hidden">С даты</span><input type="date" name="from" value="{{ since.isoformat() if since else '' }}"></label>
+  <span class="muted" aria-hidden="true">—</span>
+  <label class="date-range"><span class="visually-hidden">По дату</span><input type="date" name="to" value="{{ until.isoformat() if until else '' }}"></label>
+  {% for key, value in extra.items() if value and key != 'deleted' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+  {{ caller() if caller else '' }}
+  <noscript><button class="button small" type="submit">Применить</button></noscript>
+</form>
+{% endmacro %}
