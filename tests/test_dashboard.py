@@ -20,7 +20,7 @@ from dashboard.__main__ import MoscowRequestHandler, main
 from dashboard.agent_process import execute_agent
 from dashboard.runner import execute_run
 from dashboard.search import SearchError, domain_hint, match_position
-from dashboard.storage import SCHEMA, connect, finish_run, run_lock
+from dashboard.storage import SCHEMA, connect, finish_run, run_lock, start_agent_session
 from modules.clock import MSK
 
 PROJECT_URL = "https://www.master-bobr.ru/"
@@ -717,6 +717,34 @@ class DemoDataTest(unittest.TestCase):
             self.assertIn("visit-high", visits)
             positions = client.get("/projects/2/positions").get_data(as_text=True)
             self.assertEqual(positions.count("data-day="), 10)
+
+    def test_demo_agent_waits_for_captcha_then_finishes(self):
+        from examples.dashboard_demo import DemoAgent, demo_search, seed, seed_agent
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "demo.sqlite3"
+            create_app(path, demo_search, demo=True)
+            seed(path)
+            seed_agent(path)
+            with connect(path) as db:
+                session_id = start_agent_session(db, 2, None)
+                db.execute("UPDATE agent_sessions SET resume = 1 WHERE id = ?", (session_id,))
+            self.assertEqual(DemoAgent(step=0)(path, session_id), "complete")
+            with connect(path) as db:
+                row = db.execute("SELECT status, message, report_json FROM agent_sessions WHERE id = ?",
+                                 (session_id,)).fetchone()
+            report = json.loads(row["report_json"])
+            self.assertEqual((row["status"], row["message"]), ("DONE", "Найдено 4 из 5 фраз."))
+            operations = [event["operation"] for event in report["events"]]
+            self.assertIn("Капча", operations)
+            self.assertIn("Оператор нажал «Продолжить»", operations)
+            self.assertIn("Уточнённый запрос", operations)
+            with connect(path) as db:
+                session_id = start_agent_session(db, 2, None)
+            self.assertEqual(DemoAgent(step=0, captcha_wait=0)(path, session_id), "failed")
+            with connect(path) as db:
+                self.assertEqual(db.execute("SELECT status FROM agent_sessions WHERE id = ?", (session_id,)).fetchone()[0],
+                                 "ERROR")
 
 
 class SearchRankTest(unittest.TestCase):

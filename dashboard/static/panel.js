@@ -293,6 +293,11 @@ if (agentStatus && agentStatus.dataset.agentState === "running") {
     label.textContent = data.label;
     label.className = `agent-state status-${data.status}`;
     agentStatus.querySelector("[data-agent-message]").textContent = data.message;
+    const history = document.querySelector(`[data-agent-history="${Number(data.id)}"]`);
+    if (history) {
+      history.querySelector("[data-history-status]").textContent = data.label;
+      history.querySelector("[data-history-message]").textContent = data.message || "—";
+    }
     agentStatus.querySelector("[data-agent-resume]").hidden = !(data.state === "running" && data.status === "CAPTCHA");
     agentStatus.querySelector("[data-agent-keywords]").replaceChildren(...data.keywords.map((word) => {
       const row = document.createElement("tr");

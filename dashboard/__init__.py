@@ -702,8 +702,8 @@ def create_app(
         if values["balance"]:
             values["balance"] = metric(float(values["balance"])).replace(" ", "")
         key_state = (
-            f"Ключ сохранён в панели: {mask_secret(saved_key)}" if saved_key
-            else f"Используется YANDEX_API_KEY из .env: {mask_secret(env_key)}" if env_key
+            f"Ключ сохранён в панели: {mask_secret(saved_key)}." if saved_key
+            else f"Используется YANDEX_API_KEY из .env: {mask_secret(env_key)}." if env_key
             else "Ключ не задан."
         )
         return render_template(

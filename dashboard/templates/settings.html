@@ -29,7 +29,7 @@
         {% for key, label in position_sources.items() %}
         <label class="check-label"><input type="radio" name="position_source" value="{{ key }}" {{ 'checked' if values.position_source == key }}> {{ label }}</label>
         {% endfor %}
-        <p class="hint">Отложенные запросы стоят {{ day_price }} ₽ днём и {{ night_price }} ₽ ночью (00:00–08:00 МСК) за 1000 запросов, один запрос — топ-50 фразы. Ответ готовится от нескольких минут до нескольких часов.</p>
+        <p class="hint">Отложенные запросы стоят {{ day_price|metric(' ₽') }} днём и {{ night_price|metric(' ₽') }} ночью (00:00–08:00 МСК) за 1000 запросов, один запрос — топ-50 фразы. Ответ готовится от нескольких минут до нескольких часов.</p>
       </div>
       <div class="field">
         <label class="field-label" for="yandex-api-key">YANDEX_API_KEY</label>

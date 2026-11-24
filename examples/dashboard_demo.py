@@ -1,13 +1,19 @@
 """Run an offline example with: python -m examples.dashboard_demo."""
 import argparse
+import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from dashboard import create_app
 from dashboard.runner import execute_run
-from dashboard.storage import connect, save_panel_setting, save_project, save_project_settings, start_run
-from modules.clock import MSK
+from dashboard.search import domain_hint
+from dashboard.storage import (
+    connect, finish_agent_session, project_keywords, save_panel_setting, save_project, save_project_settings,
+    start_agent_session, start_run, update_agent_session,
+)
+from modules.clock import MSK, timestamp
 
 SITE = "https://example.org"
 LANDING = f"{SITE}/catalog/potolki/"
@@ -116,6 +122,103 @@ def seed(path, balance="0"):
             )
 
 
+class DemoAgent:
+    """Scripted «🚀 Запустить агента» without a browser: search → captcha → «Продолжить» → site found.
+
+    The statuses, phrases and journal have the same shape as the ones published by modules/session.py.
+    """
+
+    def __init__(self, step=1.5, captcha_wait=300):
+        self.step, self.captcha_wait = step, captcha_wait
+
+    def __call__(self, path, session_id):
+        with connect(path) as db:
+            row = db.execute("SELECT * FROM agent_sessions WHERE id = ?", (session_id,)).fetchone()
+            project = db.execute("SELECT * FROM projects WHERE id = ?", (row["project_id"],)).fetchone()
+            words = [
+                word for word in project_keywords(db, project["id"])
+                if row["ordinal"] is None or word["ordinal"] == row["ordinal"]
+            ]
+        self.path, self.session_id = path, session_id
+        self.report = {"events": [], "keywords": []}
+        for index, word in enumerate(words):
+            hint = word["brand"] if word["hint_type"] == "brand" else domain_hint(project["url"])
+            outcome = {"phrase": word["phrase"], "query": None, "found": False, "position": None, "page": None,
+                       "refined": False}
+            self.report["keywords"].append(outcome)
+            for refined, query in enumerate((word["phrase"], f"{word['phrase']} {hint}")):
+                outcome.update(query=query, refined=bool(refined))
+                if refined:
+                    self.event("Уточнённый запрос", query=query)
+                self.status("SEARCH", f"Поиск «{query}» в Яндексе.", "Ввод фразы и «Найти»", query=query)
+                if index == 0 and not refined and not self.captcha(query):
+                    return self.finish("failed", "ERROR", "Капча не решена за 5 мин.")
+                rank, _ = SEARCH_RESULTS.get(query, (None, None))
+                if rank:
+                    page = (rank - 1) // 10 + 1
+                    for number in range(1, page):
+                        self.event("Следующая страница выдачи", query=query, page=number + 1)
+                    outcome.update(found=True, position=rank, page=page)
+                    self.event("Клик по результату", query=query, page=page)
+                    self.status("FOUND", f"«{query}»: сайт найден на позиции {rank} (страница {page}) и открыт.")
+                    break
+                self.event("Сайт не найден", query=query, error="Целевой домен не найден (страниц: 5, позиций: 50)")
+                self.status("NOT_FOUND", f"«{query}»: сайт не найден в топ-50.")
+        found = sum(item["found"] for item in self.report["keywords"])
+        return self.finish("complete", "DONE", f"Найдено {found} из {len(words)} фраз.")
+
+    def event(self, operation, **details):
+        self.report["events"].append({"timestamp_msk": timestamp(), "operation": operation, **details})
+
+    def status(self, status, message, operation=None, **details):
+        if operation:
+            self.event(operation, **details)
+        with connect(self.path) as db:
+            update_agent_session(db, self.session_id, status, message, report_json=self.json())
+        time.sleep(self.step)
+
+    def captcha(self, query):
+        self.event("Капча", query=query, error="Требуется решение оператора в noVNC")
+        self.status("CAPTCHA", "Решите капчу в окне noVNC или нажмите «Продолжить».")
+        deadline = time.monotonic() + self.captcha_wait
+        while time.monotonic() < deadline:
+            with connect(self.path) as db:
+                if db.execute(
+                    "UPDATE agent_sessions SET resume = 0 WHERE id = ? AND resume = 1", (self.session_id,),
+                ).rowcount:
+                    self.event("Оператор нажал «Продолжить»", query=query)
+                    return True
+            time.sleep(0.5)
+        return False
+
+    def finish(self, state, status, message):
+        with connect(self.path) as db:
+            finish_agent_session(db, self.session_id, state, status, message, report_json=self.json())
+        return state
+
+    def json(self):
+        return json.dumps(self.report, ensure_ascii=False)
+
+
+def seed_agent(path):
+    """One finished agent run for the «История запусков» table."""
+    with connect(path) as db:
+        project_id = db.execute("SELECT id FROM projects WHERE url = ?", (SITE,)).fetchone()["id"]
+        session_id = start_agent_session(db, project_id, 1)
+    report = {
+        "events": [
+            {"timestamp_msk": timestamp(), "operation": "Ввод фразы и «Найти»", "query": "Матовые потолки"},
+            {"timestamp_msk": timestamp(), "operation": "Клик по результату", "query": "Матовые потолки", "page": 1},
+        ],
+        "keywords": [{"phrase": "Матовые потолки", "query": "Матовые потолки", "found": True, "position": 8,
+                      "page": 1, "refined": False}],
+    }
+    with connect(path) as db:
+        finish_agent_session(
+            db, session_id, "complete", "DONE", "Найдено 1 из 1 фраз.", report_json=json.dumps(report, ensure_ascii=False),
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8080)
@@ -123,8 +226,9 @@ def main():
     args = parser.parse_args()
     with TemporaryDirectory(prefix="local-pf-demo-") as directory:
         path = Path(directory) / "demo.sqlite3"
-        app = create_app(path, demo_search, demo=True)
+        app = create_app(path, demo_search, demo=True, agent_session_runner=DemoAgent())
         seed(path, args.balance)
+        seed_agent(path)
         app.run(host="127.0.0.1", port=args.port)
 
 

@@ -71,7 +71,7 @@
       <thead><tr><th>№</th><th>Проект</th><th>Начало</th><th>Статус</th><th>Итог</th></tr></thead>
       <tbody>
         {% for row in history %}
-        <tr><td><a href="{{ url_for('agent_page', session=row.id) }}">{{ row.id }}</a></td><td>{{ row.name }}</td><td>{{ row.started_at|display_date }}</td><td>{{ agent_statuses.get(row.status, row.status) }}</td><td>{{ row.message or '—' }}</td></tr>
+        <tr data-agent-history="{{ row.id }}"><td><a href="{{ url_for('agent_page', session=row.id) }}">{{ row.id }}</a></td><td>{{ row.name }}</td><td>{{ row.started_at|display_date }}</td><td data-history-status>{{ agent_statuses.get(row.status, row.status) }}</td><td data-history-message>{{ row.message or '—' }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
