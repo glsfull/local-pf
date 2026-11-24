@@ -279,3 +279,56 @@ if (chartCanvas && window.Chart) {
     },
   });
 }
+
+// Agent page: live status, keyword results and latest actions from /agent/<id>/status.json.
+const agentStatus = document.querySelector("[data-agent-status]");
+if (agentStatus && agentStatus.dataset.agentState === "running") {
+  const cell = (text) => {
+    const td = document.createElement("td");
+    td.textContent = text;
+    return td;
+  };
+  const render = (data) => {
+    const label = agentStatus.querySelector("[data-agent-label]");
+    label.textContent = data.label;
+    label.className = `agent-state status-${data.status}`;
+    agentStatus.querySelector("[data-agent-message]").textContent = data.message;
+    const history = document.querySelector(`[data-agent-history="${Number(data.id)}"]`);
+    if (history) {
+      history.querySelector("[data-history-status]").textContent = data.label;
+      history.querySelector("[data-history-message]").textContent = data.message || "—";
+    }
+    agentStatus.querySelector("[data-agent-resume]").hidden = !(data.state === "running" && data.status === "CAPTCHA");
+    agentStatus.querySelector("[data-agent-keywords]").replaceChildren(...data.keywords.map((word) => {
+      const row = document.createElement("tr");
+      row.append(
+        cell(word.phrase),
+        cell(`${word.query || "—"}${word.refined ? " (уточнение)" : ""}`),
+        cell(word.found ? String(word.position) : "не найден"),
+        cell(word.page ? String(word.page) : "—"),
+      );
+      return row;
+    }));
+    agentStatus.querySelector("[data-agent-log]").replaceChildren(...data.events.map((event) => {
+      const item = document.createElement("li");
+      const time = document.createElement("time");
+      time.textContent = (event.timestamp_msk || "").slice(11, 19);
+      const text = document.createElement("span");
+      text.textContent = [event.operation, event.query, event.page && `стр. ${event.page}`, event.error]
+        .filter(Boolean).join(" · ");
+      item.append(time, text);
+      return item;
+    }));
+  };
+  const poll = () => {
+    fetch(agentStatus.dataset.agentStatus, { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
+      .then((data) => {
+        render(data);
+        if (data.state === "running") window.setTimeout(poll, 2000);
+        else window.setTimeout(() => window.location.reload(), 500);
+      })
+      .catch(() => window.setTimeout(poll, 5000));
+  };
+  window.setTimeout(poll, 2000);
+}

@@ -61,6 +61,11 @@ class Fixture(BaseHTTPRequestHandler):
                 return '<script>location.replace("/showcaptcha")</script>', 200
             attrs = 'target="_blank"' if mode == "new_tab" else ""
             decoy = '<a class="result" href="http://localhost.invalid">Другой сайт</a>'
+            if mode in ("second_page", "paged_missing"):
+                page = int(parse_qs(url.query).get("p", ["0"])[0])
+                following = f'<a class="Pager-Item_type_next" href="/results?{url.query.split("&p=")[0]}&p={page + 1}">→</a>'
+                found = mode == "second_page" and page == 1
+                return decoy + (f'<a class="result" href="{target}/landing">Цель</a>' if found else following), 200
             match = f'<a class="result" {attrs} href="{target}/landing">Цель</a>'
             return decoy + ("" if mode == "missing_site" else match), 200
         if url.path == "/ranks":
@@ -247,6 +252,25 @@ class BrowserTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assert_pages(report, ("Новости", "OK"), ("#more", "OK"), ("/news", "OK"))
+
+    def test_target_on_second_results_page(self):
+        code, report = self.check_run("second_page")
+        self.assertEqual(code, 0)
+        # Every page starts with a decoy: positions are counted across pages (1, then 2 and 3).
+        self.assertEqual((report["search_position"], report["search_page"]), (3, 2))
+        pages = [parse_qs(query).get("p") for path, query, _ in self.server.requests if path == "/results"]
+        self.assertEqual(pages, [None, ["1"]])
+        click = next(event for event in report["events"] if event["operation"] == "Клик по результату")
+        self.assertEqual((click["page"], click["position"]), (2, 3))
+
+    def test_search_stops_after_five_results_pages(self):
+        code, report = self.check_run("paged_missing")
+        self.assertEqual(code, 1)
+        self.assertFalse(report["search_result_found"])
+        self.assertEqual(sum(1 for path, _, _ in self.server.requests if path == "/results"), 5)
+        failure = report["events"][-1]
+        self.assertEqual(failure["status"], "NOT_FOUND")
+        self.assertIn("страниц: 5, позиций: 5", failure["error"])
 
     def test_missing_site(self):
         code, report = self.check_run("missing_site")

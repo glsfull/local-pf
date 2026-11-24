@@ -6,6 +6,10 @@ from urllib.parse import urlsplit
 import yaml
 
 
+NEXT_PAGE_SELECTOR = "a.Pager-Item_type_next, a[aria-label='Следующая страница']"
+CAPTCHA_SELECTOR = "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
+
+
 @dataclass(frozen=True)
 class TargetPage:
     label: str
@@ -26,6 +30,8 @@ class Config:
     captcha: str
     timeout: float
     observation_delay: float = 0.7
+    max_pages: int = 5
+    next_page: str = NEXT_PAGE_SELECTOR
 
 
 def read_text(value, field):
@@ -73,6 +79,9 @@ def read_config(path: Path):
             raise ValueError
     except (UnicodeError, ValueError):
         raise ValueError("TARGET_DOMAIN: требуется имя хоста без схемы и пути") from None
+    depth = data.get("SEARCH_DEPTH_PAGES", 5)
+    if type(depth) is not int or not 1 <= depth <= 5:
+        raise ValueError("SEARCH_DEPTH_PAGES: требуется целое число от 1 до 5")
     pages = data.get("TARGET_PAGES")
     if not isinstance(pages, list) or not pages:
         raise ValueError("TARGET_PAGES: требуется непустой список")
@@ -98,9 +107,11 @@ def read_config(path: Path):
             data.get("RESULT_LINK_SELECTOR", "a.OrganicTitle-Link"), "RESULT_LINK_SELECTOR"
         ),
         captcha=read_text(
-            data.get("CAPTCHA_SELECTOR", "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"),
+            data.get("CAPTCHA_SELECTOR", CAPTCHA_SELECTOR),
             "CAPTCHA_SELECTOR",
         ),
         timeout=timeout,
         observation_delay=delay,
+        max_pages=depth,
+        next_page=read_text(data.get("NEXT_PAGE_SELECTOR", NEXT_PAGE_SELECTOR), "NEXT_PAGE_SELECTOR"),
     )

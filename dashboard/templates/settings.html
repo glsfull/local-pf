@@ -22,6 +22,35 @@
       <label class="field-label" for="telegram-url">Ссылка на Телеграм-группу</label>
       <input id="telegram-url" name="telegram_url" value="{{ values.telegram_url }}" maxlength="2048" placeholder="https://t.me/…">
     </div>
+    <fieldset class="settings-group stack">
+      <legend>Съём позиций · Yandex Search API</legend>
+      <div class="field">
+        <span class="field-label">Источник позиций для кнопки «📸 Снять позиции»</span>
+        {% for key, label in position_sources.items() %}
+        <label class="check-label"><input type="radio" name="position_source" value="{{ key }}" {{ 'checked' if values.position_source == key }}> {{ label }}</label>
+        {% endfor %}
+        <p class="hint">Отложенные запросы стоят {{ day_price|metric(' ₽') }} днём и {{ night_price|metric(' ₽') }} ночью (00:00–08:00 МСК) за 1000 запросов, один запрос — топ-50 фразы. Ответ готовится от нескольких минут до нескольких часов.</p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="yandex-api-key">YANDEX_API_KEY</label>
+        <input id="yandex-api-key" name="yandex_api_key" type="password" autocomplete="off" maxlength="200" placeholder="{{ 'Оставьте пустым, чтобы не менять ключ' if has_saved_key else 'API-ключ сервисного аккаунта' }}">
+        <p class="hint" id="key-state">{{ key_state }} Нужна роль <code>search-api.webSearch.user</code>.</p>
+        {% if has_saved_key %}<label class="check-label"><input type="checkbox" name="clear_api_key" value="1"> Удалить сохранённый ключ</label>{% endif %}
+      </div>
+      <div class="field">
+        <label class="field-label" for="yandex-folder-id">YANDEX_FOLDER_ID</label>
+        <input id="yandex-folder-id" name="yandex_folder_id" value="{{ values.yandex_folder_id }}" maxlength="50" placeholder="{{ env_folder or 'b1g…' }}">
+        {% if env_folder and not values.yandex_folder_id %}<p class="hint">Используется YANDEX_FOLDER_ID из .env.</p>{% endif %}
+      </div>
+    </fieldset>
+    <fieldset class="settings-group stack">
+      <legend>Агент в контейнере dp-agent</legend>
+      <div class="field">
+        <label class="field-label" for="novnc-url">Адрес noVNC</label>
+        <input id="novnc-url" name="novnc_url" value="{{ values.novnc_url }}" maxlength="2048" placeholder="{{ novnc_url }}">
+        <p class="hint">Окно Chromium агента: здесь оператор решает капчу и наблюдает за поиском.</p>
+      </div>
+    </fieldset>
     <div><button class="button primary" type="submit">Сохранить</button></div>
   </form>
   <section class="card connection">
@@ -29,8 +58,8 @@
     {% if demo %}
     <p>Панель использует локальный пример поисковой выдачи.</p>
     {% else %}
-    <p>Агент читает фразы из общей базы SQLite и записывает туда результаты проверки.</p>
-    <p>Запустите контейнер агента и держите <a href="http://localhost:56565/">noVNC</a> открытым во время прогона.</p>
+    <p>Позиции снимаются через Yandex Search API без браузера и капчи; «🚀 Запустить агента» открывает Chromium в контейнере dp-agent.</p>
+    <p>Держите <a href="{{ novnc_url }}" target="_blank" rel="noopener">noVNC</a> открытым во время работы агента.</p>
     {% endif %}
   </section>
 </div>

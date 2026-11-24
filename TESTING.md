@@ -1,5 +1,43 @@
 # Отчёт о проверке local-pf
 
+## Проверка для PR №13 (issue №12)
+
+Требования и проверки перечислены в [docs/issue12-spec.md](docs/issue12-spec.md),
+раздел 3. Проверено на Linux с Python 3.15, Chromium и Node.js:
+
+```bash
+python -m pytest tests -q --ignore=tests/test_agent.py   # панель, Search API, агент, YAML-конфигурация
+python -m pytest tests/test_agent.py -q                  # агент в настоящем headless Chromium
+```
+
+- `tests/test_issue12.py`:
+  - протокол Search API (отложенные запросы, опрос операций, XML, стоимость
+    днём и ночью) с подменой HTTP-ответов;
+  - кнопка «📸 Снять позиции» и уточнение только для ненайденных фраз;
+  - «🚀 Запустить агента», статус, «Продолжить» и единственный активный запуск;
+  - капча и таймаут ожидания оператора;
+  - флаги Chromium;
+  - запуск контейнера `dp-agent` одной командой;
+  - загрузка `examples/panel.example.yaml`.
+- `tests/test_dashboard.py::DemoDataTest::test_demo_agent_waits_for_captcha_then_finishes`
+  проверяет сценарий демо-агента: капча → «Продолжить» → «Найдено 4 из 5 фраз»,
+  а без оператора — «Ошибка».
+
+Скриншоты `docs/screenshots/issue12-*.jpg` сняты в Playwright Chromium по
+демо-данным. Сценарий сохраняет ключ API и проверяет, что в странице
+показаны только последние 4 символа. Затем он запускает агента для всех фраз
+проекта, ждёт капчу, нажимает «Продолжить» и ждёт «Завершено». Консоль
+браузера ошибок не показала.
+
+```bash
+python -m examples.dashboard_demo --port 8091 --balance 1500
+NODE_PATH="$(npm root -g)" node experiments/issue12_screenshots.js http://127.0.0.1:8091 docs/screenshots
+```
+
+Не проверено: настоящий Yandex Search API (нужны ключ и каталог Yandex Cloud),
+живая выдача ya.ru и Docker Desktop на Windows. Подробности — в разделе 7
+спецификации.
+
 ## Проверка для PR №11
 
 Интерфейс в стиле ТопПульт (issue №9) проверен на Linux с Python 3.15 и Node.js:

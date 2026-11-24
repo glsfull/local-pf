@@ -138,6 +138,17 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
     return 0 if state == "complete" else 1
 
 
+def run_session(path, session_id):
+    from dashboard.storage import agent_lock
+    from modules.session import AgentSession
+
+    if not path.is_file():
+        raise ValueError(f"База данных панели не найдена: {path}")
+    session = AgentSession(path, session_id)
+    with agent_lock(path), TemporaryDirectory(prefix="local-pf-agent-") as profile:
+        return session.execute(lambda: open_browser(15, profile=profile), close_browser)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Проверка ссылок через поиск Яндекса")
     parser.add_argument("--config", type=Path, default=ROOT / "config.yaml")
@@ -148,6 +159,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run-id", type=int, help="Выполнить проверку позиций, созданную панелью")
     mode.add_argument("--project-id", type=int, help="Создать и выполнить проверку позиций проекта из SQLite")
+    mode.add_argument("--session-id", type=int, help="Выполнить запуск агента, созданный кнопкой панели")
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
     if not args.headless and Path("/.dockerenv").exists():
@@ -162,6 +174,10 @@ def main():
         logging.basicConfig(level=logging.INFO, handlers=handlers)
         if args.debug:
             logging.getLogger("modules").setLevel(logging.DEBUG)
+        if args.session_id is not None:
+            if args.headless or os.environ.get("DISPLAY") != ":1":
+                parser.error("Для запуска агента требуется видимый Chromium на DISPLAY=:1 (noVNC).")
+            return run_session(args.db, args.session_id)
         if args.run_id is not None or args.project_id is not None:
             if args.headless or os.environ.get("DISPLAY") != ":1":
                 parser.error("Для проверки позиций требуется видимый Chromium на DISPLAY=:1.")

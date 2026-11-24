@@ -18,8 +18,19 @@
   <div class="toolbar-group">
     <form method="post" action="{{ url_for('new_run', project_id=project.id) }}">
       <input type="hidden" name="csrf" value="{{ csrf_token() }}">
-      <button class="button primary" {% if not configured or active or low_balance %}disabled{% endif %}>Собрать позиции</button>
+      <button class="button primary" {% if not configured or active or low_balance %}disabled{% endif %} title="{{ source }}">📸 Снять позиции</button>
     </form>
+    {% if agent_enabled %}
+    <form method="post" action="{{ url_for('start_agent') }}" class="toolbar-form">
+      <input type="hidden" name="csrf" value="{{ csrf_token() }}">
+      <label class="sr-only" for="agent-target">Фраза для агента</label>
+      <select id="agent-target" name="target">
+        <option value="{{ project.id }}:">Все фразы проекта</option>
+        {% for word in keywords %}<option value="{{ project.id }}:{{ word.ordinal }}">{{ word.phrase }}</option>{% endfor %}
+      </select>
+      <button class="button outline" {% if not keywords %}disabled{% endif %}>🚀 Запустить агента</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% if low_balance %}
@@ -117,6 +128,7 @@
       <h2>Детали проверки</h2>
       <p class="muted">{{ run.source }} · {{ run.started_at|display_date }}{% if run.region %} · Регион {{ run.region }}{% endif %} · <span class="state {{ run.state }}">{{ states[run.state] }}</span></p>
       {% if run.project_url != project.url %}<p class="muted">{{ run.project_url }}</p>{% endif %}
+      {% if api_usage %}<p class="muted" data-api-usage>Yandex Search API: запросов {{ api_usage[0] }} · {{ api_usage[1]|metric(' ₽') }}</p>{% endif %}
       {% if has_report %}<p><a href="{{ url_for('run_logs', project_id=project.id, run_id=run.id) }}">Журнал проверки</a></p>{% endif %}
     </div>
     {% if runs|length > 1 %}
