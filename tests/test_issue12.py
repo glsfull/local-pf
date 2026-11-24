@@ -16,11 +16,12 @@ from xml.sax.saxutils import escape
 from dashboard import create_app
 from dashboard.__main__ import main, open_panel
 from dashboard.agent_process import agent_command, execute_agent_session
+from dashboard.config_import import import_config, read_config as read_panel_config
 from dashboard.search import SearchError
 from dashboard.search_api import (
     DAY_PRICE, NIGHT_PRICE, OPERATION_ENDPOINT, SEARCH_ENDPOINT, YandexDeferredSearch, parse_results, request_price,
 )
-from dashboard.storage import connect, start_agent_session
+from dashboard.storage import connect, panel_setting, project_keywords, project_settings, start_agent_session
 from modules.clock import MSK
 from modules.config import read_config
 from modules.journal import Journal
@@ -388,6 +389,94 @@ class AgentSessionTest(DashboardCase):
         row = self.row(session_id)
         self.assertEqual((row["state"], row["status"]), ("failed", "ERROR"))
         self.assertIn("Капча не решена", row["message"])
+
+
+class ConfigImportTest(DashboardCase):
+    EXAMPLE = ROOT / "examples" / "panel.example.yaml"
+
+    def write(self, text):
+        config = Path(self.directory.name) / "panel.yaml"
+        config.write_text(text, encoding="utf-8")
+        return config
+
+    def projects(self):
+        with connect(self.path) as db:
+            return [
+                (row["name"], row["url"], row["region"], [
+                    (word["phrase"], word["hint_type"], word["brand"]) for word in project_keywords(db, row["id"])
+                ], project_settings(db, row["id"]))
+                for row in db.execute("SELECT * FROM projects ORDER BY id")
+            ]
+
+    def test_example_config_creates_then_updates_projects(self):
+        self.assertEqual(import_config(self.path, self.EXAMPLE), "Конфигурация загружена: проектов создано 2, обновлено 0.")
+        shop, service = self.projects()
+        self.assertEqual(shop[:3], ("Пример — интернет-магазин", "https://example-shop.ru/", "213"))
+        self.assertEqual(shop[3], [
+            ("купить диван", "domain", ""), ("угловой диван недорого", "brand", "Пример Шоп"),
+            ("диван кровать с доставкой", "brand", "ПримерШоп"), ("диваны москва", "domain", ""),
+        ])
+        self.assertEqual(shop[4]["brand_queries"], "Пример Шоп")
+        self.assertEqual(shop[4]["collect_daily"], 1)
+        self.assertEqual(service[:3], ("Пример — услуги", "https://example-service.ru", "2"))
+        with connect(self.path) as db:
+            self.assertEqual(panel_setting(db, "novnc_url"), "http://localhost:56565/")
+            self.assertEqual(panel_setting(db, "position_source"), "api")
+            self.assertIsNone(panel_setting(db, "yandex_api_key"))
+
+        config = self.write(
+            "settings:\n  yandex_api_key: AQVN0123456789abcdef\n  yandex_folder_id: b1gexample\n"
+            "projects:\n  - url: https://example-shop.ru/\n    name: Магазин\n    region: 213\n"
+            "    keywords: [купить диван, диван недорого]\n"
+        )
+        self.assertEqual(import_config(self.path, config), "Конфигурация загружена: проектов создано 0, обновлено 1.")
+        shop, service = self.projects()
+        self.assertEqual(shop[0], "Магазин")
+        self.assertEqual([word[0] for word in shop[3]], ["купить диван", "диван недорого"])
+        self.assertEqual(shop[4]["brand_queries"], "Пример Шоп")
+        with connect(self.path) as db:
+            self.assertEqual(panel_setting(db, "yandex_api_key"), "AQVN0123456789abcdef")
+            self.assertEqual(panel_setting(db, "yandex_folder_id"), "b1gexample")
+        with patch.dict(os.environ, NO_ENV):
+            page = self.client.get("/settings").get_data(as_text=True)
+        self.assertIn("••••cdef", page)
+        self.assertNotIn("AQVN0123456789abcdef", page)
+
+    def test_invalid_config_is_rejected_without_changes(self):
+        cases = {
+            "conversions:\n  cart: true\n": "Конверсии (корзина, формы, регистрация",
+            "settings:\n  yandex_folder_id: Bad Folder\n": "YANDEX_FOLDER_ID: латинские буквы и цифры",
+            "settings:\n  novnc_url: ftp://host/\n": "Адрес noVNC должен начинаться",
+            "projects:\n  - url: shop.ru\n    keywords:\n      - phrase: диван\n        hint_type: zone\n":
+                "Проект 1: Выберите тип подсказки в строке 1.",
+            "projects:\n  - url: shop.ru\n    keywords: [диван, Диван]\n":
+                "Проект 1: Поисковая фраза в строке 2 уже есть в проекте.",
+            "projects:\n  - url: shop.ru\n    keywords: [диван]\n    clicks: 5\n": "Проект 1: неизвестный ключ «clicks»",
+            "projects:\n  - url: shop.ru\n    keywords: [диван]\n  - url: bad url\n    keywords: [диван]\n":
+                "Проект 2: Введите адрес сайта",
+            "projects: [\n": "не является корректным YAML",
+        }
+        for text, message in cases.items():
+            with self.subTest(message):
+                with self.assertRaises(ValueError) as caught:
+                    import_config(self.path, self.write(text))
+                self.assertIn(message, str(caught.exception))
+                self.assertEqual(self.projects(), [])
+        self.assertEqual(read_panel_config(""), (None, []))
+
+    def test_entrypoint_loads_config(self):
+        argv = ["dashboard", "--no-browser", "--db", str(self.path)]
+        with patch("dashboard.__main__.load_dotenv"), patch("flask.Flask.run") as run, \
+                patch("dashboard.__main__.start_scheduler"):
+            with patch("sys.argv", argv + ["--config", str(self.EXAMPLE)]):
+                main()
+            self.assertEqual(len(self.projects()), 2)
+            run.reset_mock()
+            with patch("sys.argv", argv + ["--config", str(self.write("conversions: {}\n"))]), \
+                    self.assertRaises(SystemExit) as caught:
+                main()
+        self.assertEqual(caught.exception.code, 2)
+        run.assert_not_called()
 
 
 class EntrypointTest(unittest.TestCase):
