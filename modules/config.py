@@ -26,12 +26,53 @@ class Config:
     captcha: str
     timeout: float
     observation_delay: float = 0.7
+    captcha_attempts: int = 3
+    captcha_timeout: float = 300
+    captcha_poll: float = 2
 
 
 def read_text(value, field):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field}: требуется непустая строка")
     return value.strip()
+
+
+def read_number(value, field, low, high, *, integer=False, allow_low=True):
+    kinds = (int,) if integer else (float, int)
+    if (
+        type(value) not in kinds
+        or not isfinite(value)
+        or value > high
+        or value < low
+        or (not allow_low and value == low)
+    ):
+        bracket = "[" if allow_low else "("
+        kind = "целое число" if integer else "число"
+        raise ValueError(f"{field}: требуется {kind} в диапазоне {bracket}{low:g}, {high:g}]")
+    return value
+
+
+def captcha_settings(values, names=None):
+    """Read SmartCaptcha limits from YAML values or environment strings."""
+    names = names or {
+        "attempts": "CAPTCHA_SOLVE_ATTEMPTS",
+        "timeout": "CAPTCHA_MANUAL_TIMEOUT_SECONDS",
+        "poll": "CAPTCHA_POLL_SECONDS",
+    }
+    defaults = {"attempts": 3, "timeout": 300, "poll": 2}
+    result = {}
+    for key, name in names.items():
+        value = values.get(name, defaults[key])
+        if isinstance(value, str):
+            try:
+                value = int(value) if key == "attempts" else float(value)
+            except ValueError:
+                pass
+        limits = {"attempts": (0, 10), "timeout": (0, 3600), "poll": (0, 60)}[key]
+        result[key] = read_number(
+            value, name, *limits, integer=key == "attempts", allow_low=key != "poll",
+        )
+    return result
 
 
 def read_page(value):
@@ -86,6 +127,7 @@ def read_config(path: Path):
     delay = data.get("OBSERVATION_DELAY_SECONDS", 0.7)
     if type(delay) not in (float, int) or not 0 <= delay <= 5:
         raise ValueError("OBSERVATION_DELAY_SECONDS: требуется число от 0 до 5")
+    captcha = captcha_settings(data)
     return Config(
         keyword=read_text(data.get("SEARCH_KEYWORD"), "SEARCH_KEYWORD"),
         domain=domain,
@@ -103,4 +145,7 @@ def read_config(path: Path):
         ),
         timeout=timeout,
         observation_delay=delay,
+        captcha_attempts=captcha["attempts"],
+        captcha_timeout=captcha["timeout"],
+        captcha_poll=captcha["poll"],
     )

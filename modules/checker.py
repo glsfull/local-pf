@@ -5,6 +5,7 @@ from .browser import (
     AccessDenied,
     PageFailure,
     RunError,
+    SearchChallenge,
     check_document,
     click_and_follow,
     loaded_document,
@@ -12,7 +13,7 @@ from .browser import (
     wait_for,
 )
 from .clock import timestamp
-from .search import SearchChallenge, check_challenge
+from .search import check_challenge
 
 
 def matches_path(url, expected):
@@ -43,7 +44,7 @@ def find_link(tab, target, domain):
     return None
 
 
-def check_page(browser, home, target, config, journal, result):
+def check_page(browser, home, target, config, journal, result, captcha=None):
     link = wait_for(lambda: find_link(home, target, config.domain), config.timeout)
     selector = target.selector or "a[href]"
     journal.record(
@@ -59,7 +60,10 @@ def check_page(browser, home, target, config, journal, result):
         result["url"] = state["url"]
     journal.record("Переход на страницу", result["url"], http_status=state["status"])
     if matches_domain(state["url"], config.domain):
-        check_challenge(tab, state["url"], config)
+        solved = check_challenge(tab, state["url"], config, captcha)
+        if solved is not None:
+            state = solved
+            result["url"] = state["url"]
     check_document(state)
     if not matches_domain(state["url"], config.domain):
         raise PageFailure("UNEXPECTED_PAGE", "После клика открылся другой домен")
@@ -110,7 +114,7 @@ def restore_home(browser, home, known_tabs, entry, landing_url, timeout, journal
         journal.record("Переход на входную страницу", landing_url)
 
 
-def check_pages(browser, home, config, report, journal):
+def check_pages(browser, home, config, report, journal, *, captcha=None):
     entry = history_entry(home)
     landing_url = home.url
     known_tabs = set(browser.get_tabs(as_id=True))
@@ -124,7 +128,7 @@ def check_pages(browser, home, config, report, journal):
             "error": None,
         }
         try:
-            check_page(browser, home, target, config, journal, result)
+            check_page(browser, home, target, config, journal, result, captcha)
         except (AccessDenied, SearchChallenge, PageFailure) as error:
             result.update(status=error.status, error=str(error))
             if not isinstance(error, PageFailure):

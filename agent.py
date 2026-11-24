@@ -10,12 +10,20 @@ from dotenv import load_dotenv
 from DrissionPage.errors import BrowserConnectError, PageDisconnectedError
 from filelock import Timeout
 
-from modules.browser import RunError, close_browser, open_browser
+from modules.browser import (
+    CAPTCHA_SELECTOR,
+    CaptchaHandler,
+    RunError,
+    SearchChallenge,
+    close_browser,
+    load_solver,
+    open_browser,
+)
 from modules.checker import check_pages
 from modules.clock import MoscowFormatter, timestamp
-from modules.config import read_config
+from modules.config import captcha_settings, read_config
 from modules.journal import Journal
-from modules.search import SEARCH_HOME, SearchChallenge, find_target
+from modules.search import SEARCH_HOME, find_target
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger(__name__)
@@ -33,20 +41,44 @@ def write_report(path, report):
     log.info("Отчёт сохранён в %s", path)
 
 
+def captcha_handler(journal, report, *, selector, timeout, attempts, manual_timeout, poll, report_path):
+    """Build the SmartCaptcha handler that keeps report.json current while it waits."""
+    def save_progress():
+        write_report(report_path, report)
+
+    return CaptchaHandler(
+        journal, report, selector=selector, timeout=timeout, attempts=attempts,
+        manual_timeout=manual_timeout, poll_interval=poll,
+        solver=load_solver(os.getenv("LOCAL_PF_CAPTCHA_SOLVER")),
+        screenshot_dir=report_path.parent / "captcha" if report_path is not None else None,
+        save_progress=save_progress if report_path is not None else None,
+        operator_url=os.getenv("LOCAL_PF_OPERATOR_URL", "http://localhost:56565"),
+    )
+
+
 def run(config, report, *, headless=False, search_home=SEARCH_HOME, report_path=None):
     journal = Journal(report.setdefault("events", []), 0 if headless else config.observation_delay)
+    captcha = captcha_handler(
+        journal, report, selector=config.captcha, timeout=config.timeout,
+        attempts=config.captcha_attempts, manual_timeout=config.captcha_timeout,
+        poll=config.captcha_poll, report_path=report_path,
+    )
+    report["status"] = "RUNNING"
     for attempt in range(3):
         browser = None
         retry = False
         with TemporaryDirectory(prefix="local-pf-") as profile:
             try:
                 browser = open_browser(config.timeout, headless=headless, profile=profile)
-                home = find_target(browser, config, report, journal, search_home)
-                check_pages(browser, home, config, report, journal)
+                home = find_target(browser, config, report, journal, search_home, captcha=captcha)
+                check_pages(browser, home, config, report, journal, captcha=captcha)
+                report["status"] = "OK"
                 return 0
             except SearchChallenge as error:
                 report["captcha_encountered"] = True
+                report["status"] = error.status
                 journal.record("Ошибка", error.url, status=error.status, error=str(error))
+                log.error("%s", error)
                 return 1
             except (BrowserConnectError, PageDisconnectedError):
                 log.exception("Chromium недоступен, попытка %d из 3", attempt + 1)
@@ -55,14 +87,17 @@ def run(config, report, *, headless=False, search_home=SEARCH_HOME, report_path=
                     "Ошибка", journal.url, status="BROWSER_ERROR",
                     error=f"Chromium недоступен, попытка {attempt + 1} из 3",
                 )
+                report["status"] = "BROWSER_ERROR"
                 if retry:
                     report["search_result_found"] = False
                     report["pages_checked"].clear()
             except RunError as error:
-                journal.record("Ошибка", journal.url, status=getattr(error, "status", "ERROR"), error=str(error))
+                report["status"] = getattr(error, "status", "ERROR")
+                journal.record("Ошибка", journal.url, status=report["status"], error=str(error))
                 log.error("%s", error)
                 return 1
             except Exception as error:
+                report["status"] = "ERROR"
                 journal.record("Ошибка", journal.url, status="ERROR", error=str(error))
                 log.exception("Ошибка выполнения")
                 return 1
@@ -108,8 +143,19 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
         "pages_checked": [],
         "events": [],
     }
+    captcha = captcha_settings(os.environ, {
+        "attempts": "LOCAL_PF_CAPTCHA_ATTEMPTS",
+        "timeout": "LOCAL_PF_CAPTCHA_TIMEOUT",
+        "poll": "LOCAL_PF_CAPTCHA_POLL",
+    })
+    journal = Journal(report["events"], delay)
     with run_lock(path), TemporaryDirectory(prefix="local-pf-rank-") as profile:
-        source = RankParser(Journal(report["events"], delay), report, profile=profile)
+        handler = captcha_handler(
+            journal, report, selector=CAPTCHA_SELECTOR, timeout=15,
+            attempts=captcha["attempts"], manual_timeout=captcha["timeout"], poll=captcha["poll"],
+            report_path=log_dir / "report.json",
+        )
+        source = RankParser(journal, report, profile=profile, handler=handler)
         with connect(path) as db:
             if project_id is not None:
                 db.execute("BEGIN IMMEDIATE")
@@ -125,9 +171,11 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
             run = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
             if run is None or run["state"] != "running":
                 raise ValueError("Активная проверка не найдена.")
-        report.update(run_id=run_id, target_domain=site_host(run["project_url"]))
+        report.update(run_id=run_id, target_domain=site_host(run["project_url"]), status="RUNNING")
         try:
             state = execute_run(path, run_id, source, report=report)
+            if report["status"] != "TIMEOUT":
+                report["status"] = "OK" if state == "complete" else "ERROR"
             write_report(log_dir / "report.json", report)
         finally:
             if source.browser is not None:

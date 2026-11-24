@@ -10,3 +10,7 @@ RESULT_LINK_SELECTOR: "a.OrganicTitle-Link, .serp-item h2 a, .serp-item h3 a"
 CAPTCHA_SELECTOR: "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
 TIMEOUT_SECONDS: 15
 OBSERVATION_DELAY_SECONDS: 0.7
+# SmartCaptcha: автоматические попытки, ожидание оператора в noVNC и интервал проверки.
+CAPTCHA_SOLVE_ATTEMPTS: 3
+CAPTCHA_MANUAL_TIMEOUT_SECONDS: 300
+CAPTCHA_POLL_SECONDS: 2

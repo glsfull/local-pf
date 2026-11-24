@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from DrissionPage.errors import PageDisconnectedError
 
@@ -18,11 +18,90 @@ from agent import run, verify, verify_positions
 from dashboard import create_app
 from dashboard.search import SearchError
 from dashboard.storage import connect, save_project
-from modules.browser import close_browser, matches_domain, open_browser, wait_for
+from modules.browser import (
+    CaptchaHandler,
+    CaptchaTimeout,
+    close_browser,
+    load_solver,
+    matches_domain,
+    open_browser,
+    wait_for,
+)
 from modules.clock import MoscowFormatter
-from modules.config import TargetPage, read_config
+from modules.config import TargetPage, captcha_settings, read_config
 from modules.journal import Journal
 from modules.rank_parser import RankParser
+
+CHECKBOX_PAGE = """
+<form id="checkbox-captcha-form" action="/solve">
+  <div class="CheckboxCaptcha"><div class="CheckboxCaptcha-Anchor">
+    <input id="js-button" class="CheckboxCaptcha-Button" type="button" role="checkbox"
+           aria-checked="false" style="width:56px;height:56px;margin:140px 0 0 220px">
+  </div></div>
+</form>
+<script>
+  let moves = 0;
+  addEventListener('mousemove', event => { if (event.isTrusted) moves++; });
+  document.getElementById('js-button').addEventListener('click', event => {
+    location.replace('NEXT&trusted=' + event.isTrusted + '&moves=' + moves);
+  });
+</script>
+"""
+IMAGE_PAGE = """
+<div class="AdvancedCaptcha">
+  <div class="AdvancedCaptcha-FormLabel">Нажмите в таком порядке: красный, синий</div>
+  <div class="AdvancedCaptcha-View" style="position:relative;width:300px;height:200px;background:#eee">
+    <div style="position:absolute;left:40px;top:50px;width:20px;height:20px;background:red"></div>
+    <div style="position:absolute;left:190px;top:110px;width:20px;height:20px;background:blue"></div>
+  </div>
+  <button data-testid="submit" class="CaptchaButton_view_action">Отправить</button>
+</div>
+<script>
+  const clicks = [];
+  const view = document.querySelector('.AdvancedCaptcha-View');
+  view.addEventListener('click', event => {
+    const box = view.getBoundingClientRect();
+    clicks.push([event.clientX - box.left, event.clientY - box.top]);
+  });
+  document.querySelector('[data-testid=submit]').addEventListener('click', () => {
+    const near = (point, x, y) => point && Math.hypot(point[0] - x, point[1] - y) < 12;
+    const solved = clicks.length === 2 && near(clicks[0], 50, 60) && near(clicks[1], 200, 120);
+    fetch('/captcha-submit?clicks=' + clicks.length).then(() => {
+      if (solved) location.replace('SOLVE'); else location.reload();
+    });
+  });
+</script>
+"""
+TEXT_PAGE = """
+<div class="AdvancedCaptcha">
+  <div class="AdvancedCaptcha-FormLabel">Введите текст с картинки</div>
+  <div class="AdvancedCaptcha-View"><img class="AdvancedCaptcha-Image" alt="" width="200" height="60"></div>
+  <span class="Textinput"><input class="Textinput-Control" name="rep"></span>
+  <button data-testid="submit">Отправить</button>
+</div>
+"""
+WIDGET_PAGE = """
+<h1 id="expected">Страница с формой</h1>
+<div class="smart-captcha" data-sitekey="test-key">
+  <iframe title="SmartCaptcha checkbox widget" src="WIDGET" style="width:320px;height:120px;border:4px solid #ccc"></iframe>
+  <input type="hidden" name="smart-token" value="">
+</div>
+<script>
+  addEventListener('message', event => {
+    document.querySelector('[name=smart-token]').value = event.data.token;
+    fetch('/widget-solved?trusted=' + event.data.trusted);
+  });
+</script>
+"""
+WIDGET_FRAME = """
+<div class="CheckboxCaptcha"><input id="js-button" class="CheckboxCaptcha-Button" type="button"
+  style="width:40px;height:40px;margin:30px 0 0 60px"></div>
+<script>
+  document.getElementById('js-button').addEventListener('click', event => {
+    parent.postMessage({token: 'token-' + Date.now(), trusted: event.isTrusted}, '*');
+  });
+</script>
+"""
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -54,6 +133,14 @@ class Fixture(BaseHTTPRequestHandler):
                     <button id="search-button">Найти</button>
                 </form>
             """, 200
+        if url.path in ("/solve", "/showcaptcha", "/captcha-submit", "/widget", "/widget-solved"):
+            return self.captcha_response(url)
+        if url.path in ("/results", "/ranks") and mode.startswith("captcha_") and not self.server.solved:
+                kind = mode.removeprefix("captcha_")
+                return (
+                    "<script>location.replace('/showcaptcha?kind=" + kind
+                    + "&retpath=' + encodeURIComponent(location.href))</script>"
+                ), 200
         if url.path == "/results":
             if mode == "results_challenge":
                 return '<input name="smart-token" type="hidden">', 200
@@ -102,6 +189,9 @@ class Fixture(BaseHTTPRequestHandler):
         if url.path in ("/news", "/more"):
             if mode == "target_challenge":
                 return '<input name="smart-token" type="hidden">', 403
+            if mode == "target_widget":
+                widget = f"http://localhost:{self.server.server_port}/widget"
+                return WIDGET_PAGE.replace("WIDGET", widget), 200
             return """
                 <h1 id="expected">Страница работает</h1><div style="height:2400px"></div>
                 <script>
@@ -109,6 +199,33 @@ class Fixture(BaseHTTPRequestHandler):
                 </script>
             """, 200
         return "", 200
+
+    def captcha_response(self, url):
+        params = {key: values[0] for key, values in parse_qs(url.query).items()}
+        self.server.captcha_log.append((url.path, params))
+        retpath = params.get("retpath", "/")
+        solve = "/solve?retpath=" + quote(retpath, safe="")
+        if url.path == "/solve":
+            self.server.solved = True
+            return f"<script>location.replace({json.dumps(retpath)})</script>", 200
+        if url.path == "/widget":
+            return WIDGET_FRAME, 200
+        if url.path in ("/captcha-submit", "/widget-solved"):
+            return "", 200
+        kind = params.get("kind")
+        if kind in ("checkbox", "image") and params.get("step") != "advanced":
+            following = solve if kind == "checkbox" else (
+                "/showcaptcha?kind=image&step=advanced&retpath=" + quote(retpath, safe="")
+            )
+            return CHECKBOX_PAGE.replace("NEXT", following), 200
+        if kind == "image":
+            return IMAGE_PAGE.replace("SOLVE", solve), 200
+        operator = ""
+        if self.server.operator_delay is not None:
+            # The fixture plays the operator who solves the captcha in noVNC.
+            delay = int(self.server.operator_delay * 1000)
+            operator = f"<script>setTimeout(() => location.replace({json.dumps(solve)}), {delay})</script>"
+        return TEXT_PAGE + operator, 200
 
     def log_message(self, *_):
         pass
@@ -130,17 +247,29 @@ class BrowserTests(unittest.TestCase):
             domain="127.0.0.1",
             result_link="a.result",
             timeout=2,
+            captcha_timeout=0,
+            captcha_poll=0.2,
         )
+        for name, value in (("CHECKBOX_WAIT", (0.3, 0.5)), ("CLICK_DELAY", (0.1, 0.2)), ("SUBMIT_WAIT", 0.5)):
+            patcher = patch(f"modules.browser.{name}", value)
+            patcher.start()
+            cls.addClassCleanup(patcher.stop)
 
-    def check_run(self, mode, *targets):
+    def setUp(self):
+        self.server.solved = False
+        self.server.captcha_log = []
+        self.server.operator_delay = None
+
+    def check_run(self, mode, *targets, **settings):
         self.server.mode = mode
         self.server.requests = []
         with TemporaryDirectory() as output:
             config = replace(
-                self.config, pages=targets or (TargetPage("/news", url="/news"),)
+                self.config, pages=targets or (TargetPage("/news", url="/news"),), **settings
             )
             code = verify(config, Path(output), headless=True, search_home=self.search_home)
             report = json.loads((Path(output) / "report.json").read_text(encoding="utf-8"))
+            report["captcha_files"] = sorted(path.name for path in Path(output).glob("captcha/*.png"))
         self.assertEqual(report["keyword"], self.config.keyword)
         self.assertEqual(report["target_domain"], self.config.domain)
         self.assertTrue(report["timestamp"].endswith("+03:00"))
@@ -258,6 +387,7 @@ class BrowserTests(unittest.TestCase):
         code, report = self.check_run("home_challenge")
         self.assertEqual(code, 1)
         self.assertTrue(report["captcha_encountered"])
+        self.assertEqual(report["status"], "TIMEOUT")
         self.assertFalse(report["search_result_found"])
         self.assertFalse(any(path == "/results" for path, _, _ in self.server.requests))
 
@@ -341,10 +471,140 @@ class BrowserTests(unittest.TestCase):
         )
         self.assertEqual(code, 1)
         self.assertTrue(report["captcha_encountered"])
-        self.assert_pages(report, ("/news", "CAPTCHA"))
-        self.assertEqual(report["events"][-1]["status"], "CAPTCHA")
+        self.assert_pages(report, ("/news", "TIMEOUT"))
+        self.assertEqual(report["events"][-1]["status"], "TIMEOUT")
+        self.assertEqual(report["status"], "TIMEOUT")
         self.assertTrue(report["events"][-1]["url"].endswith("/news"))
         self.assertFalse(any(path == "/more" for path, _, _ in self.server.requests))
+
+    def operations(self, report):
+        return [event["operation"] for event in report["events"]]
+
+    def test_checkbox_captcha_is_clicked_with_smooth_mouse_movement(self):
+        code, report = self.check_run("captcha_checkbox")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["status"], "OK")
+        self.assertTrue(report["captcha_encountered"])
+        self.assert_pages(report, ("/news", "OK"))
+        operations = self.operations(report)
+        start = operations.index("Обнаружена капча")
+        self.assertEqual(
+            operations[start:start + 3],
+            ["Обнаружена капча", "Попытка нажать чекбокс", "Капча решена автоматически"],
+        )
+        self.assertEqual(report["events"][start]["captcha_type"], "checkbox")
+        solved = [params for path, params in self.server.captcha_log if path == "/solve"]
+        self.assertEqual(solved[0]["trusted"], "true")
+        self.assertGreaterEqual(int(solved[0]["moves"]), 10)
+        self.assertEqual((report["captcha"]["attempts"], report["captcha"]["resolution"]), (1, "automatic"))
+
+    def test_checkbox_widget_inside_cross_origin_frame(self):
+        code, report = self.check_run("target_widget")
+        self.assertEqual(code, 0)
+        self.assert_pages(report, ("/news", "OK"))
+        self.assertIn(("/widget-solved", {"trusted": "true"}), self.server.captcha_log)
+        self.assertIn("Капча решена автоматически", self.operations(report))
+
+    def test_image_captcha_is_solved_by_local_model(self):
+        with patch.dict("os.environ", {
+            "LOCAL_PF_CAPTCHA_SOLVER": "examples.captcha_solver_fixed:solve",
+            "LOCAL_PF_CAPTCHA_POINTS": "50,60;200,120",
+        }):
+            code, report = self.check_run("captcha_image")
+        self.assertEqual(code, 0)
+        self.assert_pages(report, ("/news", "OK"))
+        operations = self.operations(report)
+        for operation in (
+            "Попытка нажать чекбокс", "Капча не решена", "Тип капчи изменился",
+            "Попытка решить задание с картинками", "Ответ локальной модели",
+            "Нажатие кнопки «Отправить»", "Капча решена автоматически",
+        ):
+            self.assertIn(operation, operations)
+        answer = next(event for event in report["events"] if event["operation"] == "Ответ локальной модели")
+        self.assertEqual(answer["points"], 2)
+        self.assertEqual(len(report["captcha_files"]), 1)
+        self.assertEqual(report["captcha"]["attempts"], 2)
+        self.assertIn(("/captcha-submit", {"clicks": "2"}), self.server.captcha_log)
+
+    def test_wrong_model_answers_stop_after_three_attempts(self):
+        with patch.dict("os.environ", {
+            "LOCAL_PF_CAPTCHA_SOLVER": "examples.captcha_solver_fixed:solve",
+            "LOCAL_PF_CAPTCHA_POINTS": "10,10;20,20",
+        }):
+            code, report = self.check_run("captcha_image", captcha_timeout=0.5)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "TIMEOUT")
+        self.assertEqual(report["captcha"]["attempts"], 3)
+        self.assertEqual(report["captcha"]["resolution"], "timeout")
+        submits = [path for path, _ in self.server.captcha_log if path == "/captcha-submit"]
+        self.assertEqual(len(submits), 2)
+        self.assertFalse(any(path == "/landing" for path, _, _ in self.server.requests))
+
+    def test_complex_captcha_waits_for_operator_and_continues(self):
+        self.server.operator_delay = 1.5
+        statuses = []
+        real_write = __import__("agent").write_report
+
+        def snapshot(path, report):
+            statuses.append(report.get("status"))
+            real_write(path, report)
+
+        with patch("agent.write_report", side_effect=snapshot), self.assertLogs("modules.browser", "WARNING") as logs:
+            code, report = self.check_run("captcha_text", captcha_timeout=15)
+        self.assertEqual(code, 0)
+        self.assert_pages(report, ("/news", "OK"))
+        self.assertIn("CAPTCHA_MANUAL_REQUIRED: Требуется участие оператора.", "\n".join(logs.output))
+        operations = self.operations(report)
+        self.assertNotIn("Попытка нажать чекбокс", operations)
+        start = operations.index("Обнаружена капча")
+        self.assertEqual(operations[start + 1:start + 3], [
+            "Капча не решена, ожидание оператора", "Оператор решил капчу, продолжаем",
+        ])
+        manual = report["events"][start + 1]
+        self.assertEqual(
+            (manual["status"], manual["captcha_type"], manual["operator_url"]),
+            ("CAPTCHA_MANUAL_REQUIRED", "complex", "http://localhost:56565"),
+        )
+        self.assertGreaterEqual(report["events"][start + 2]["waited_seconds"], 1)
+        self.assertEqual(report["captcha"]["resolution"], "operator")
+        # report.json is rewritten while the agent waits so the dashboard shows the request.
+        self.assertEqual(statuses[0], "CAPTCHA_MANUAL_REQUIRED")
+        self.assertEqual(statuses[-1], "OK")
+
+    def test_operator_timeout_saves_report_and_exits(self):
+        code, report = self.check_run("captcha_text", captcha_timeout=1)
+        self.assertEqual(code, 1)
+        self.assertEqual(report["status"], "TIMEOUT")
+        self.assertTrue(report["captcha_encountered"])
+        self.assertFalse(report["search_result_found"])
+        operations = self.operations(report)
+        self.assertEqual(operations[-3:], [
+            "Капча не решена, ожидание оператора", "Время ожидания оператора истекло", "Ошибка",
+        ])
+        self.assertEqual(report["events"][-1]["status"], "TIMEOUT")
+        self.assertIn("1 с", report["events"][-1]["error"])
+
+    def test_rank_parser_continues_after_operator_solves_captcha(self):
+        self.server.mode, self.server.operator_delay = "captcha_text", 1
+        report = {"events": [], "pages_checked": [], "captcha_encountered": False}
+        journal = Journal(report["events"], 0)
+        handler = CaptchaHandler(journal, report, timeout=2, manual_timeout=15, poll_interval=0.2)
+        with patch.dict("os.environ", {"LOCAL_PF_RESULTS_URL": self.search_home + "/ranks"}):
+            parser = RankParser(journal, report, timeout=2, handler=handler)
+        parser.browser = open_browser(2, headless=True)
+        self.addCleanup(close_browser, parser.browser)
+        results = parser("проверка", 0, "")
+        self.assertEqual(results, ["https://other.example/"])
+        self.assertTrue(report["captcha_encountered"])
+        self.assertEqual(report["pages_checked"][-1]["status"], "OK")
+        self.assertIn("Оператор решил капчу, продолжаем", self.operations(report))
+
+        self.server.mode, self.server.solved, self.server.operator_delay = "captcha_text", False, None
+        handler.manual_timeout = 0
+        with self.assertRaisesRegex(SearchError, "TIMEOUT"):
+            parser("проверка", 1, "")
+        self.assertEqual(report["status"], "TIMEOUT")
+        self.assertEqual(report["pages_checked"][-1]["status"], "TIMEOUT")
 
 
 class UnitTests(unittest.TestCase):
@@ -359,6 +619,47 @@ class UnitTests(unittest.TestCase):
         self.assertTrue(matches_domain("https://www.example.com:8080/path", "example.com"))
         self.assertFalse(matches_domain("https://example.com.invalid/path", "example.com"))
         self.assertFalse(matches_domain("https://other.invalid/?target=example.com", "example.com"))
+
+    def test_captcha_settings_from_environment(self):
+        names = {"attempts": "A", "timeout": "T", "poll": "P"}
+        self.assertEqual(
+            captcha_settings({"A": "5", "T": "0", "P": "0.5"}, names),
+            {"attempts": 5, "timeout": 0, "poll": 0.5},
+        )
+        self.assertEqual(captcha_settings({}), {"attempts": 3, "timeout": 300, "poll": 2})
+        for values, field in (({"A": "1.5"}, "A"), ({"T": "-1"}, "T"), ({"P": "0"}, "P"), ({"T": "x"}, "T")):
+            with self.subTest(values=values), self.assertRaisesRegex(ValueError, field):
+                captcha_settings(values, names)
+
+    def test_solver_is_loaded_from_module_and_function(self):
+        self.assertIsNone(load_solver(""))
+        solve = load_solver("examples.captcha_solver_fixed:solve")
+        with patch.dict("os.environ", {"LOCAL_PF_CAPTCHA_POINTS": "1,2; 3.5,4"}):
+            self.assertEqual(solve({}), [(1.0, 2.0), (3.5, 4.0)])
+        with self.assertRaisesRegex(ValueError, "module:function"):
+            load_solver("examples.captcha_solver_fixed")
+
+    def test_manual_wait_polls_until_timeout(self):
+        report, saved, now = {"events": []}, [], [0.0]
+        handler = CaptchaHandler(
+            Journal(report["events"], 0), report, manual_timeout=6, poll_interval=2,
+            save_progress=lambda: saved.append(report["status"]),
+        )
+        tab = Mock(url="https://ya.ru/showcaptcha")
+        with (
+            patch.object(CaptchaHandler, "present", return_value=True) as present,
+            patch("modules.browser.time.monotonic", side_effect=lambda: now[0]),
+            patch("modules.browser.time.sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)),
+            self.assertRaises(CaptchaTimeout),
+        ):
+            handler.wait_for_captcha_resolution(tab)
+        self.assertEqual(present.call_count, 3)
+        self.assertEqual(saved, ["CAPTCHA_MANUAL_REQUIRED", "TIMEOUT"])
+        self.assertTrue(report["captcha_encountered"])
+        self.assertEqual(
+            [event["operation"] for event in report["events"]],
+            ["Капча не решена, ожидание оператора", "Время ожидания оператора истекло"],
+        )
 
     @patch("agent.check_pages")
     @patch("agent.find_target")

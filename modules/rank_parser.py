@@ -3,20 +3,20 @@ import os
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from dashboard.search import MAX_RANK, SearchError, site_host
-from .browser import RunError, check_document, loaded_document, open_browser, wait_for
+from .browser import CAPTCHA_SELECTOR, RunError, SearchChallenge, check_document, loaded_document, open_browser
 from .clock import timestamp
-from .search import SearchChallenge, check_challenge
+from .search import check_challenge, wait_past_challenge
 
 DEFAULT_RESULTS_URL = "https://ya.ru/search/"
 RESULT_LINK_SELECTOR = "li.serp-item a.OrganicTitle-Link, li.serp-item h2 > a"
 EMPTY_SELECTOR = ".EmptySearchResults, .SearchEmpty"
-CAPTCHA_SELECTOR = "[data-sitekey], input[name='smart-token'], #checkbox-captcha-form"
 logger = logging.getLogger(__name__)
 
 
 class RankParser:
-    def __init__(self, journal, report, *, timeout=15, profile=None):
+    def __init__(self, journal, report, *, timeout=15, profile=None, handler=None):
         self.journal = journal
+        self.handler = handler
         self.report = report
         self.timeout = timeout
         self.profile = profile
@@ -40,9 +40,9 @@ class RankParser:
             self.browser = open_browser(self.timeout, profile=self.profile)
         self.browser.get(url, retry=0, timeout=self.timeout)
         state = loaded_document(self.browser, self.timeout, validate=False)
+        self.journal.record("Переход к выдаче", state["url"], http_status=state["status"])
+        state = check_challenge(self.browser, state["url"], self, self.handler) or state
         actual_url = state["url"]
-        self.journal.record("Переход к выдаче", actual_url, http_status=state["status"])
-        check_challenge(self.browser, actual_url, self)
         check_document(state)
         actual = urlsplit(actual_url)
         fields = parse_qs(actual.query)
@@ -71,7 +71,7 @@ class RankParser:
             return None
 
         # An explicit empty page is valid. An unknown layout is an error.
-        result = wait_for(parse, self.timeout)
+        result = wait_past_challenge(parse, self.browser, self.timeout, self.handler)
         if result is None:
             raise SearchError("Не распознана поисковая выдача. Проверьте селекторы парсера.")
         urls, = result
