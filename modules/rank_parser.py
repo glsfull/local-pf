@@ -3,7 +3,7 @@ import os
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from dashboard.search import MAX_RANK, SearchError, site_host
-from .browser import RunError, check_document, loaded_document, open_browser, wait_for
+from .browser import RunError, check_document, close_browser, loaded_document, open_identity, wait_for
 from .clock import timestamp
 from .search import SearchChallenge, check_challenge
 
@@ -15,8 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 class RankParser:
-    def __init__(self, journal, report, *, timeout=15, profile=None):
+    def __init__(self, journal, report, *, timeout=15, profile=None, identities=None):
+        """identities() → the profile and proxy of the next phrase (one phrase = one profile + one proxy)."""
         self.journal = journal
+        self.identities = identities
+        self.identity = None
         self.report = report
         self.timeout = timeout
         self.profile = profile
@@ -28,6 +31,21 @@ class RankParser:
         self.link_selector = os.getenv("LOCAL_PF_RESULT_LINK_SELECTOR", RESULT_LINK_SELECTOR)
         self.empty_selector = os.getenv("LOCAL_PF_EMPTY_RESULTS_SELECTOR", EMPTY_SELECTOR)
 
+    def begin_phrase(self):
+        """Close the browser of the previous phrase and take the next profile and proxy."""
+        self.close()
+        if self.identities is not None:
+            self.identity = self.identities()
+            self.journal.record("Профиль и прокси", None, **self.identity.journal_details())
+
+    def close(self):
+        browser, self.browser = self.browser, None
+        if browser is not None:
+            try:
+                close_browser(browser)
+            except Exception:
+                logger.exception("Не удалось закрыть Chromium")
+
     def page_url(self, query, page, region):
         fields = parse_qs(self.source.query)
         fields.update(text=[query], p=[page])
@@ -37,7 +55,9 @@ class RankParser:
 
     def read_results(self, url, query, page):
         if self.browser is None:
-            self.browser = open_browser(self.timeout, profile=self.profile)
+            if self.identity is None and self.identities is not None:
+                self.begin_phrase()
+            self.browser = open_identity(self.timeout, self.identity, profile=self.profile)
         self.browser.get(url, retry=0, timeout=self.timeout)
         state = loaded_document(self.browser, self.timeout, validate=False)
         actual_url = state["url"]

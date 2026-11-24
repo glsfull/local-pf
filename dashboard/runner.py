@@ -31,6 +31,9 @@ def execute_run(path, run_id, search_page, wait=time.sleep, *, report=None):
             for index, row in enumerate(measurements):
                 if index and run["interval_seconds"]:
                     wait(run["interval_seconds"])
+                if batched(search_page, "begin_phrase"):
+                    # One phrase = one profile + one proxy: the main and the refined query share them.
+                    search_page.begin_phrase()
                 args = (run["project_url"], row["landing_url"], run["region"])
                 rank = measure(path, run_id, row, search_page, args)
                 if rank is None:

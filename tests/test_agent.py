@@ -18,7 +18,7 @@ from agent import run, verify, verify_positions
 from dashboard import create_app
 from dashboard.search import SearchError
 from dashboard.storage import connect, save_project
-from modules.browser import close_browser, matches_domain, open_browser, wait_for
+from modules.browser import close_browser, matches_domain, open_browser, open_identity, wait_for
 from modules.clock import MoscowFormatter
 from modules.config import TargetPage, read_config
 from modules.journal import Journal
@@ -203,7 +203,7 @@ class BrowserTests(unittest.TestCase):
                     "LOCAL_PF_RESULTS_URL": self.search_home + "/ranks",
                     "LOCAL_PF_OBSERVATION_DELAY": "0",
                 }),
-                patch("modules.rank_parser.open_browser", side_effect=lambda *args, **kwargs: open_browser(
+                patch("modules.rank_parser.open_identity", side_effect=lambda *args, **kwargs: open_identity(
                     *args, **kwargs, headless=True,
                 )),
             ):

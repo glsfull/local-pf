@@ -1,11 +1,18 @@
+import json
 import os
+from pathlib import Path
 import shutil
+import socket
 import time
 from urllib.parse import urlsplit
 
 from DrissionPage import ChromiumOptions, ChromiumPage
 from DrissionPage.errors import ContextLostError
 from psutil import NoSuchProcess, Process, TimeoutExpired
+
+from .proxy_relay import ProxyRelay
+
+COOKIES_MARKER = ".local-pf-cookies"
 
 
 class RunError(Exception):
@@ -22,23 +29,77 @@ class AccessDenied(RunError):
     status = "ACCESS_DENIED"
 
 
-def open_browser(timeout, *, headless=False, profile=None):
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def open_browser(timeout, *, headless=False, profile=None, user_data=None, proxy=None, cookies=()):
+    """Chromium for one agent run.
+
+    profile — parent directory for a temporary profile that is deleted with the browser;
+    user_data — persistent profile directory of a Yandex profile (cookies are imported on its first launch);
+    proxy — dashboard.identities.Proxy: without a password it goes to --proxy-server as is, with a password
+    the browser uses a local relay (modules/proxy_relay.py) that adds the credentials.
+    """
     chrome = os.getenv("CHROME_PATH") or shutil.which("google-chrome") or shutil.which("chromium")
     if not chrome:
         raise RunError("Chromium не найден. Укажите CHROME_PATH.")
     options = ChromiumOptions(read_file=False).set_browser_path(chrome).auto_port()
-    if profile is not None:
+    if user_data is not None:
+        Path(user_data).mkdir(parents=True, exist_ok=True)
+        # An explicit data directory turns auto_port off: the port is picked here, the directory is kept.
+        options.set_user_data_path(str(user_data)).set_local_port(free_port())
+    elif profile is not None:
         options.set_tmp_path(str(profile))
     options.set_argument("--disable-dev-shm-usage")
+    options.set_argument("--no-first-run")
     # The sandbox needs kernel features that Docker hides; root cannot use it at all.
     if (hasattr(os, "geteuid") and os.geteuid() == 0) or os.path.exists("/.dockerenv"):
         options.set_argument("--no-sandbox")
+    relay = None
+    if proxy is not None:
+        if proxy.authenticated:
+            relay = ProxyRelay(proxy).start()
+            options.set_argument("--proxy-server", relay.address)
+        else:
+            options.set_argument("--proxy-server", proxy.server)
     options.set_retry(0).set_timeouts(base=timeout, page_load=timeout, script=timeout)
     options.headless(headless)
-    return ChromiumPage(options)
+    try:
+        browser = ChromiumPage(options)
+        browser.local_pf_relay = relay
+        if user_data is not None and cookies:
+            import_cookies(browser, Path(user_data), cookies)
+    except BaseException:
+        if relay is not None:
+            relay.stop()
+        raise
+    return browser
+
+
+def open_identity(timeout, identity, *, profile, headless=False):
+    """Chromium with the Yandex profile and proxy of one phrase (dashboard.identities.Identity)."""
+    if identity is not None and identity.profile_dir is not None:
+        return open_browser(
+            timeout, headless=headless, user_data=identity.profile_dir, proxy=identity.proxy,
+            cookies=identity.cookies,
+        )
+    return open_browser(timeout, headless=headless, profile=profile, proxy=identity.proxy if identity else None)
+
+
+def import_cookies(browser, user_data, cookies):
+    """Load the cookies of a Yandex profile once: later launches keep them in the profile itself."""
+    marker = user_data / COOKIES_MARKER
+    if marker.exists():
+        return
+    browser.run_cdp("Network.setCookies", cookies=list(cookies))
+    marker.write_text(json.dumps({"cookies": len(cookies)}), encoding="utf-8")
 
 
 def close_browser(browser):
+    relay = getattr(browser, "local_pf_relay", None)
     try:
         process = Process(browser.process_id) if browser.process_id else None
     except NoSuchProcess:
@@ -57,6 +118,8 @@ def close_browser(browser):
                     pass
                 else:
                     process.wait(timeout=5)
+        if relay is not None:
+            relay.stop()
 
 
 def wait_for(probe, timeout):

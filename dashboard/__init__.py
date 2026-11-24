@@ -31,7 +31,7 @@ from .storage import (
     project_keywords, project_settings, save_panel_setting, save_project, save_project_settings, start_agent_session,
     start_run,
 )
-from . import views
+from . import identities, views
 
 BRAND = "ТопПульт"
 RUN_STATES = {
@@ -95,7 +95,7 @@ def create_app(
         SECRET_KEY=secrets.token_hex(32),
         SESSION_COOKIE_SAMESITE="Strict",
         TRUSTED_HOSTS=["127.0.0.1", "localhost"],
-        MAX_CONTENT_LENGTH=1024 * 1024,
+        MAX_CONTENT_LENGTH=8 * 1024 * 1024,
     )
     path = Path(path)
     if report_path is not None:
@@ -664,9 +664,33 @@ def create_app(
                 )) for line in data["lines"]
             ])
 
+    def render_settings(error=None, status=200):
+        with connect(path) as db:
+            values = {
+                key: panel_setting(db, key, "")
+                for key in ("balance", "user_name", "telegram_url", "yandex_folder_id", "novnc_url")
+            }
+            values["position_source"] = panel_setting(db, "position_source", "api")
+            saved_key = panel_setting(db, "yandex_api_key", "")
+            env_key, env_folder = os.getenv("YANDEX_API_KEY", ""), os.getenv("YANDEX_FOLDER_ID", "")
+            profiles, proxies = identities.list_profiles(db), identities.list_proxies(db)
+        if values["balance"]:
+            values["balance"] = metric(float(values["balance"])).replace(" ", "")
+        key_state = (
+            f"Ключ сохранён в панели: {mask_secret(saved_key)}." if saved_key
+            else f"Используется YANDEX_API_KEY из .env: {mask_secret(env_key)}." if env_key
+            else "Ключ не задан."
+        )
+        return render_template(
+            "settings.html", values=values, error=error, notice=session.pop("settings_notice", None),
+            key_state=key_state, has_saved_key=bool(saved_key), env_folder=env_folder,
+            position_sources=POSITION_SOURCES, day_price=DAY_PRICE, night_price=NIGHT_PRICE,
+            browser_configured=browser_configured, profiles=profiles, proxies=proxies,
+            max_profiles=identities.MAX_PROFILES, max_proxies=identities.MAX_PROXIES,
+        ), status
+
     @app.route("/settings", methods=["GET", "POST"])
     def settings():
-        error = None
         if request.method == "POST":
             try:
                 balance = optional_number(
@@ -680,37 +704,118 @@ def create_app(
                     raise ValueError("Ссылка на Телеграм-группу должна начинаться с https://.")
                 connection = read_connection(request.form)
             except ValueError as exc:
-                error = str(exc)
+                return render_settings(str(exc), 422)
+            with connect(path) as db:
+                save_panel_setting(db, "balance", "" if balance is None else str(balance))
+                save_panel_setting(db, "user_name", user_name)
+                save_panel_setting(db, "telegram_url", telegram)
+                # An empty key field keeps the saved key: the key is never sent back to the browser.
+                if request.form.get("clear_api_key"):
+                    save_panel_setting(db, "yandex_api_key", "")
+                save_connection(db, connection)
+            return redirect(url_for("settings"), code=303)
+        return render_settings()
+
+    def uploaded_texts():
+        """(file name, text) of every uploaded file; files must be UTF-8 text."""
+        for upload in request.files.getlist("files"):
+            if not upload or not upload.filename:
+                continue
+            try:
+                yield upload.filename, upload.read().decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise ValueError(f"Файл {upload.filename}: нужен текст в кодировке UTF-8.") from None
+
+    def read_profile_upload():
+        """Profiles from the manual fields, the list and the uploaded files of the profiles form."""
+        profiles = []
+        name, cookies = request.form.get("name", "").strip(), request.form.get("cookies", "").strip()
+        if name or cookies:
+            try:
+                profiles.append((identities.parse_profile_name(name), identities.parse_cookies(cookies)))
+            except ValueError as exc:
+                raise ValueError(f"Профиль: {exc}.") from None
+        profiles += identities.read_bulk(request.form.get("bulk", ""), identities.parse_profile_line)
+        for filename, text in uploaded_texts():
+            if filename.lower().endswith(".json"):
+                # One cookie export = one profile named after the file.
+                try:
+                    profiles.append((identities.parse_profile_name(Path(filename).stem), identities.parse_cookies(text)))
+                except ValueError as exc:
+                    raise ValueError(f"Файл {filename}: {exc}.") from None
             else:
-                with connect(path) as db:
-                    save_panel_setting(db, "balance", "" if balance is None else str(balance))
-                    save_panel_setting(db, "user_name", user_name)
-                    save_panel_setting(db, "telegram_url", telegram)
-                    # An empty key field keeps the saved key: the key is never sent back to the browser.
-                    if request.form.get("clear_api_key"):
-                        save_panel_setting(db, "yandex_api_key", "")
-                    save_connection(db, connection)
-                return redirect(url_for("settings"), code=303)
+                profiles += identities.read_bulk(text, identities.parse_profile_line, f"Файл {filename}, строка")
+        return profiles
+
+    def read_proxy_upload():
+        proxies = identities.read_bulk(request.form.get("bulk", ""), identities.parse_proxy)
+        for filename, text in uploaded_texts():
+            proxies += identities.read_bulk(text, identities.parse_proxy, f"Файл {filename}, строка")
+        return proxies
+
+    def added_notice(kind, added, skipped):
+        notice = f"{kind}: добавлено {added}."
+        return notice + (f" Пропущено повторов: {skipped}." if skipped else "")
+
+    @app.post("/settings/profiles")
+    def add_profiles():
+        try:
+            profiles = read_profile_upload()
+            if not profiles:
+                raise ValueError("Укажите название профиля, список профилей или файлы.")
+            with connect(path) as db:
+                added, skipped = identities.add_profiles(db, profiles)
+        except ValueError as exc:
+            return render_settings(str(exc), 422)
+        session["settings_notice"] = added_notice("Профили Яндекса", added, skipped)
+        return redirect(url_for("settings", _anchor="profiles"), code=303)
+
+    @app.post("/settings/proxies")
+    def add_proxies():
+        try:
+            proxies = read_proxy_upload()
+            if not proxies:
+                raise ValueError("Укажите прокси — по одному в строке — или файлы со списком.")
+            with connect(path) as db:
+                added, skipped = identities.add_proxies(db, proxies)
+        except ValueError as exc:
+            return render_settings(str(exc), 422)
+        session["settings_notice"] = added_notice("Прокси", added, skipped)
+        return redirect(url_for("settings", _anchor="proxies"), code=303)
+
+    @app.post("/settings/profiles/<int:profile_id>/delete")
+    def delete_profile(profile_id):
         with connect(path) as db:
-            values = {
-                key: panel_setting(db, key, "")
-                for key in ("balance", "user_name", "telegram_url", "yandex_folder_id", "novnc_url")
-            }
-            values["position_source"] = panel_setting(db, "position_source", "api")
-            saved_key = panel_setting(db, "yandex_api_key", "")
-            env_key, env_folder = os.getenv("YANDEX_API_KEY", ""), os.getenv("YANDEX_FOLDER_ID", "")
-        if values["balance"]:
-            values["balance"] = metric(float(values["balance"])).replace(" ", "")
-        key_state = (
-            f"Ключ сохранён в панели: {mask_secret(saved_key)}." if saved_key
-            else f"Используется YANDEX_API_KEY из .env: {mask_secret(env_key)}." if env_key
-            else "Ключ не задан."
-        )
-        return render_template(
-            "settings.html", values=values, error=error, key_state=key_state, has_saved_key=bool(saved_key),
-            env_folder=env_folder, position_sources=POSITION_SOURCES, day_price=DAY_PRICE, night_price=NIGHT_PRICE,
-            browser_configured=browser_configured,
-        ), 422 if error else 200
+            if not db.execute("DELETE FROM yandex_profiles WHERE id = ?", (profile_id,)).rowcount:
+                abort(404)
+        identities.remove_profile_dir(identities.profiles_root(path), profile_id)
+        session["settings_notice"] = "Профиль удалён."
+        return redirect(url_for("settings", _anchor="profiles"), code=303)
+
+    @app.post("/settings/profiles/delete")
+    def delete_profiles():
+        with connect(path) as db:
+            ids = [row["id"] for row in db.execute("SELECT id FROM yandex_profiles")]
+            db.execute("DELETE FROM yandex_profiles")
+        for profile_id in ids:
+            identities.remove_profile_dir(identities.profiles_root(path), profile_id)
+        session["settings_notice"] = f"Удалено профилей: {len(ids)}."
+        return redirect(url_for("settings", _anchor="profiles"), code=303)
+
+    @app.post("/settings/proxies/<int:proxy_id>/delete")
+    def delete_proxy(proxy_id):
+        with connect(path) as db:
+            if not db.execute("DELETE FROM proxies WHERE id = ?", (proxy_id,)).rowcount:
+                abort(404)
+        session["settings_notice"] = "Прокси удалён."
+        return redirect(url_for("settings", _anchor="proxies"), code=303)
+
+    @app.post("/settings/proxies/delete")
+    def delete_proxies():
+        with connect(path) as db:
+            removed = db.execute("DELETE FROM proxies").rowcount
+        session["settings_notice"] = f"Удалено прокси: {removed}."
+        return redirect(url_for("settings", _anchor="proxies"), code=303)
 
     @app.get("/help")
     def help_page():

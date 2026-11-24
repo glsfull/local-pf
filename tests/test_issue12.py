@@ -337,7 +337,7 @@ class AgentSessionTest(DashboardCase):
             return SimpleNamespace(url=PROJECT_URL)
 
         session_id, session = self.session(search)
-        self.assertEqual(session.execute(lambda: FakeBrowser(), lambda browser: None), 0)
+        self.assertEqual(session.execute(lambda identity: FakeBrowser(), lambda browser: None), 0)
         self.assertEqual(queries[:3], [
             ("Натяжные потолки", "master-bobr.ru", 5), ("Ремонт", "master-bobr.ru", 5),
             ("Ремонт master-bobr", "master-bobr.ru", 5),
@@ -349,7 +349,7 @@ class AgentSessionTest(DashboardCase):
         report = json.loads(row["report_json"])
         self.assertEqual(report["keywords"][1], {
             "phrase": "Ремонт", "query": "Ремонт master-bobr", "found": True, "position": 14, "page": 2,
-            "landing_url": PROJECT_URL, "refined": True,
+            "landing_url": PROJECT_URL, "refined": True, "profile": "временный", "proxy": None,
         })
         self.assertEqual(self.clock[0], 45)  # Project interval between phrases: 3 × 15 s.
         status = self.client.get(f"/agent/{session_id}/status.json").get_json()
@@ -376,7 +376,7 @@ class AgentSessionTest(DashboardCase):
                     db.execute("UPDATE agent_sessions SET resume = 1 WHERE id = ?", (session_id,))
 
         session.wait = wait
-        self.assertEqual(session.execute(lambda: FakeBrowser(captcha=True), lambda browser: None), 0)
+        self.assertEqual(session.execute(lambda identity: FakeBrowser(captcha=True), lambda browser: None), 0)
         self.assertEqual(attempts, ["Натяжные потолки", "Натяжные потолки"])
         report = json.loads(self.row(session_id)["report_json"])
         self.assertTrue(report["captcha_encountered"])
@@ -387,7 +387,7 @@ class AgentSessionTest(DashboardCase):
             raise SearchChallenge("https://ya.ru/showcaptcha")
 
         session_id, session = self.session(search, ordinal=0, captcha_wait=60, poll=10)
-        self.assertEqual(session.execute(lambda: FakeBrowser(captcha=True), lambda browser: None), 1)
+        self.assertEqual(session.execute(lambda identity: FakeBrowser(captcha=True), lambda browser: None), 1)
         row = self.row(session_id)
         self.assertEqual((row["state"], row["status"]), ("failed", "ERROR"))
         self.assertIn("Капча не решена", row["message"])

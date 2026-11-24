@@ -314,7 +314,7 @@ if (agentStatus && agentStatus.dataset.agentState === "running") {
       const time = document.createElement("time");
       time.textContent = (event.timestamp_msk || "").slice(11, 19);
       const text = document.createElement("span");
-      text.textContent = [event.operation, event.query, event.page && `стр. ${event.page}`, event.error]
+      text.textContent = [event.operation, event.query, event.page && `стр. ${event.page}`, event.profile, event.proxy, event.error]
         .filter(Boolean).join(" · ");
       item.append(time, text);
       return item;
@@ -331,4 +331,11 @@ if (agentStatus && agentStatus.dataset.agentState === "running") {
       .catch(() => window.setTimeout(poll, 5000));
   };
   window.setTimeout(poll, 2000);
+}
+
+// Destructive forms ask for confirmation (inline handlers are blocked by the CSP).
+for (const form of document.querySelectorAll("form[data-confirm]")) {
+  form.addEventListener("submit", (event) => {
+    if (!window.confirm(form.dataset.confirm)) event.preventDefault();
+  });
 }

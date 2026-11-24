@@ -57,7 +57,7 @@
     <h3>Последние действия</h3>
     <ol class="agent-log" data-agent-log>
       {% for event in current.events %}
-      <li><time>{{ (event.timestamp_msk or '')[11:19] }}</time><span>{{ event.operation }}{% if event.query %} · {{ event.query }}{% endif %}{% if event.page %} · стр. {{ event.page }}{% endif %}{% if event.error %} · {{ event.error }}{% endif %}</span></li>
+      <li><time>{{ (event.timestamp_msk or '')[11:19] }}</time><span>{{ event.operation }}{% if event.query %} · {{ event.query }}{% endif %}{% if event.page %} · стр. {{ event.page }}{% endif %}{% if event.profile %} · {{ event.profile }}{% endif %}{% if event.proxy %} · {{ event.proxy }}{% endif %}{% if event.error %} · {{ event.error }}{% endif %}</span></li>
       {% endfor %}
     </ol>
     {% endif %}
