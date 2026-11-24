@@ -13,6 +13,7 @@ from modules.clock import MSK, MoscowFormatter
 
 from . import create_app
 from .agent_process import execute_agent
+from .scheduler import start_scheduler
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,6 +47,7 @@ def main():
                 path, report_path=args.log_dir / "report.json",
                 agent_runner=partial(execute_agent, options=args),
             )
+            start_scheduler(path, app.launch_run)
             app.run(
                 host="127.0.0.1", port=args.port, request_handler=MoscowRequestHandler,
             )
