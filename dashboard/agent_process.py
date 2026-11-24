@@ -40,6 +40,28 @@ def agent_command(path, options, *arguments):
     return command, env
 
 
+def ensure_container(name, run=subprocess.run):
+    """Start the stopped agent container so that one command starts both the panel and the agent.
+
+    Returns a message for the panel log; a missing Docker or container is reported, not raised.
+    """
+    try:
+        state = run(
+            ["docker", "inspect", "--format", "{{.State.Running}}", name],
+            capture_output=True, text=True, timeout=30,
+        )
+        if state.returncode:
+            return f"Контейнер {name} не найден. Создайте его по README (этап 1), панель работает без агента."
+        if state.stdout.strip() == "true":
+            return f"Контейнер {name} уже запущен."
+        started = run(["docker", "start", name], capture_output=True, text=True, timeout=60)
+        if started.returncode:
+            return f"Не удалось запустить контейнер {name}: {started.stderr.strip() or started.returncode}"
+        return f"Контейнер {name} запущен."
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"Docker недоступен ({exc}). Панель работает без агента."
+
+
 def run_agent(path, options, *arguments):
     """Run agent.py and return an error message, or None when the process exited with code 0."""
     try:

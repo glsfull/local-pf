@@ -15,7 +15,7 @@ from xml.sax.saxutils import escape
 
 from dashboard import create_app
 from dashboard.__main__ import main, open_panel
-from dashboard.agent_process import agent_command, execute_agent_session
+from dashboard.agent_process import agent_command, ensure_container, execute_agent_session
 from dashboard.config_import import import_config, read_config as read_panel_config
 from dashboard.search import SearchError
 from dashboard.search_api import (
@@ -467,7 +467,7 @@ class ConfigImportTest(DashboardCase):
     def test_entrypoint_loads_config(self):
         argv = ["dashboard", "--no-browser", "--db", str(self.path)]
         with patch("dashboard.__main__.load_dotenv"), patch("flask.Flask.run") as run, \
-                patch("dashboard.__main__.start_scheduler"):
+                patch("dashboard.__main__.start_scheduler"), patch("dashboard.__main__.ensure_container"):
             with patch("sys.argv", argv + ["--config", str(self.EXAMPLE)]):
                 main()
             self.assertEqual(len(self.projects()), 2)
@@ -485,16 +485,43 @@ class EntrypointTest(unittest.TestCase):
         open_panel("http://127.0.0.1:8080/", opener)
         opener.assert_called_once_with("http://127.0.0.1:8080/")
         with TemporaryDirectory() as directory:
-            for argv, opened in ((["dashboard", "--port", "8091"], True), (["dashboard", "--no-browser"], False)):
+            for argv, opened in (
+                (["dashboard", "--port", "8091"], True), (["dashboard", "--no-browser", "--no-container"], False),
+            ):
                 with (
                     patch("sys.argv", argv + ["--db", str(Path(directory) / "panel.sqlite3")]),
                     patch("dashboard.__main__.load_dotenv"), patch("flask.Flask.run"),
                     patch("dashboard.__main__.start_scheduler"), patch("dashboard.__main__.Timer") as timer,
+                    patch("dashboard.__main__.ensure_container") as container,
                 ):
                     main()
                 self.assertEqual(timer.called, opened)
+                self.assertEqual(container.called, opened)
                 if opened:
                     self.assertEqual(timer.call_args.args[2], ("http://127.0.0.1:8091/",))
+
+    def test_one_command_starts_stopped_agent_container(self):
+        def docker(state, start=0, error=None):
+            calls = []
+
+            def run(command, **options):
+                calls.append(command[:2])
+                if error:
+                    raise error
+                if command[1] == "inspect":
+                    return SimpleNamespace(returncode=0 if state else 1, stdout=f"{state}\n", stderr="")
+                return SimpleNamespace(returncode=start, stdout="", stderr="no such image" if start else "")
+            return run, calls
+
+        run, calls = docker("false")
+        self.assertEqual(ensure_container("dp-agent", run), "Контейнер dp-agent запущен.")
+        self.assertEqual(calls, [["docker", "inspect"], ["docker", "start"]])
+        run, calls = docker("true")
+        self.assertEqual(ensure_container("dp-agent", run), "Контейнер dp-agent уже запущен.")
+        self.assertEqual(calls, [["docker", "inspect"]])
+        self.assertIn("не найден", ensure_container("dp-agent", docker("")[0]))
+        self.assertIn("no such image", ensure_container("dp-agent", docker("false", start=1)[0]))
+        self.assertIn("Docker недоступен", ensure_container("dp-agent", docker("", error=FileNotFoundError("docker"))[0]))
 
     def test_config_search_depth(self):
         config = read_config(ROOT / "config.yaml")

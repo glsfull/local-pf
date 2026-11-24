@@ -324,8 +324,10 @@ class PanelTest(DashboardCase):
             chdir(directory), patch("sys.argv", ["dashboard", "--agent-log-dir", str(directory)]),
             patch("dashboard.__main__.load_dotenv"), patch("flask.Flask.run", autospec=True, side_effect=capture),
             patch("dashboard.__main__.start_scheduler") as scheduler, patch("dashboard.__main__.Timer") as timer,
+            patch("dashboard.__main__.ensure_container", return_value="Контейнер dp-agent уже запущен.") as container,
         ):
             main()
+        container.assert_called_once_with("dp-agent")
         scheduler.assert_called_once()
         timer.assert_called_once()
         with connect(directory / ".local-pf/dashboard.sqlite3") as db:

@@ -14,7 +14,7 @@ from werkzeug.serving import WSGIRequestHandler
 from modules.clock import MSK, MoscowFormatter
 
 from . import create_app
-from .agent_process import execute_agent, execute_agent_session
+from .agent_process import ensure_container, execute_agent, execute_agent_session
 from .config_import import import_config
 from .scheduler import start_scheduler
 
@@ -43,6 +43,9 @@ def main():
     parser.add_argument("--container-db", help="Путь к общей SQLite-базе внутри контейнера")
     parser.add_argument("--container-log-dir", help="Путь к общей папке логов внутри контейнера")
     parser.add_argument("--local-agent", action="store_true", help="Chromium на локальном DISPLAY=:1")
+    parser.add_argument(
+        "--no-container", action="store_true", help="Не запускать остановленный контейнер агента",
+    )
     parser.add_argument("--no-browser", action="store_true", help="Не открывать панель в браузере")
     parser.add_argument(
         "--config", type=Path, help="YAML с ключами Search API, проектами и фразами (examples/panel.example.yaml)",
@@ -68,6 +71,8 @@ def main():
                     logging.getLogger(__name__).info("%s", import_config(path, args.config))
                 except (OSError, ValueError) as exc:
                     parser.exit(2, f"Не удалось загрузить {args.config}: {exc}\n")
+            if not (args.local_agent or args.no_container):
+                logging.getLogger(__name__).info("%s", ensure_container(args.agent_container))
             start_scheduler(path, app.launch_run)
             url = f"http://127.0.0.1:{args.port}/"
             logging.getLogger(__name__).info("Панель: %s", url)
