@@ -1,5 +1,46 @@
 # Отчёт о проверке local-pf
 
+## Проверка для PR №15 (issue №14)
+
+Требования, проверки и отчёт по капче — в
+[docs/issue14-spec.md](docs/issue14-spec.md). Проверено на Linux с Python 3.15
+и Chromium:
+
+```bash
+python -m pytest tests/test_issue14.py -q            # профили, прокси, «одна фраза — один профиль и один прокси», ретранслятор
+python -m pytest tests/test_issue14_semantic.py -q   # сбор ядра через DeepSeek (подмена HTTP)
+python -m pytest tests/test_issue14_captcha.py -q    # 10 тестов капчи в настоящем headless Chromium
+python -m pytest tests -q                            # все тесты
+```
+
+- `tests/test_issue14.py` — 17 тестов: форматы и ошибки загрузки профилей и
+  прокси, лимиты, удаление, скрытие паролей, ротация «дольше всех не
+  использовался», новая пара на каждую фразу у агента и у браузерного
+  парсера, закрытие браузера при ошибке, ретранслятор HTTP и SOCKS5 с паролем
+  и настоящий Chromium через прокси с cookies профиля.
+- `tests/test_issue14_semantic.py` — 10 тестов: тело запроса и встроенный
+  промпт, повтор пустого ответа, тексты ошибок 401/402/429/503, разбор ответа,
+  ключ в настройках (маска, `.env`, YAML), сбор, добавление фраз, лимит
+  проекта, сохранение формы при ошибке.
+- `tests/test_issue14_captcha.py` — 10 тестов, результаты в разделе 3
+  спецификации: капча распознаётся во всех четырёх видах, агент с ней не
+  взаимодействует и передаёт её оператору.
+- `FreshPanelTest` в `tests/test_dashboard.py` — новая панель и шаблоны
+  конфигурации без демо-данных.
+
+Скриншоты `docs/screenshots/issue14-*.png` сняты в Playwright Chromium на
+пустой панели. Ответ DeepSeek на скриншоте подменён локально
+(`experiments/issue14_panel.py`), ключ не настоящий:
+
+```bash
+python experiments/issue14_panel.py --port 8092
+NODE_PATH="$(npm root -g)" node experiments/issue14_screenshots.js http://127.0.0.1:8092 docs/screenshots
+```
+
+Не проверено: настоящий API DeepSeek (нет ключа), живая выдача ya.ru и
+настоящая SmartCaptcha, прокси-провайдеры. Подробности — в разделе 5
+спецификации.
+
 ## Проверка для PR №13 (issue №12)
 
 Требования и проверки перечислены в [docs/issue12-spec.md](docs/issue12-spec.md),
