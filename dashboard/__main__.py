@@ -32,6 +32,10 @@ def main():
     parser.add_argument("--container-log-dir", help="Путь к общей папке логов внутри контейнера")
     parser.add_argument("--local-agent", action="store_true", help="Chromium на локальном DISPLAY=:1")
     parser.add_argument("--debug-log", action="store_true")
+    parser.add_argument(
+        "--search-api", action="store_true",
+        help="Брать выдачу из отложенных запросов Yandex Search API вместо Chromium",
+    )
     args = parser.parse_args()
     handler = logging.StreamHandler()
     handler.setFormatter(MoscowFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
@@ -45,6 +49,7 @@ def main():
             app = create_app(
                 path, report_path=args.log_dir / "report.json",
                 agent_runner=partial(execute_agent, options=args),
+                source_label="Yandex Search API (отложенные запросы)" if args.search_api else None,
             )
             app.run(
                 host="127.0.0.1", port=args.port, request_handler=MoscowRequestHandler,

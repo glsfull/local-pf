@@ -23,7 +23,7 @@ RUN_STATES = {
 logger = logging.getLogger(__name__)
 
 
-def create_app(path, search_page=None, *, demo=False, report_path=None, agent_runner=None):
+def create_app(path, search_page=None, *, demo=False, report_path=None, agent_runner=None, source_label=None):
     app = Flask(__name__)
     app.config.update(
         SECRET_KEY=secrets.token_hex(32),
@@ -36,7 +36,7 @@ def create_app(path, search_page=None, *, demo=False, report_path=None, agent_ru
         report_path = Path(report_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     initialize(path)
-    source = "Демо-данные" if demo else "Парсер выдачи"
+    source = source_label or ("Демо-данные" if demo else "Парсер выдачи")
     configured = agent_runner is not None or search_page is not None
 
     @app.context_processor

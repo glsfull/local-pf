@@ -126,7 +126,26 @@ def verify(config, log_dir, *, headless=False, search_home=SEARCH_HOME):
     return run(config, report, headless=headless, search_home=search_home, report_path=log_dir / "report.json")
 
 
-def verify_positions(path, log_dir, *, run_id=None, project_id=None):
+API_SOURCE_LABEL = "Yandex Search API (отложенные запросы)"
+
+
+def api_source(journal, report, report_path):
+    """Build the deferred Yandex Search API source: no browser, therefore no captcha."""
+    from modules.search_api import YandexDeferredSearch
+
+    poll = float(os.getenv("LOCAL_PF_API_POLL_SECONDS", "60"))
+    if not 1 <= poll <= 3600:
+        raise ValueError("LOCAL_PF_API_POLL_SECONDS: укажите интервал от 1 до 3600 секунд.")
+    max_wait = float(os.getenv("LOCAL_PF_API_TIMEOUT_SECONDS", str(4 * 3600)))
+    if not 60 <= max_wait <= 24 * 3600:
+        raise ValueError("LOCAL_PF_API_TIMEOUT_SECONDS: укажите ожидание от 60 до 86400 секунд.")
+    return YandexDeferredSearch(
+        os.getenv("YANDEX_SEARCH_API_KEY", ""), os.getenv("YANDEX_SEARCH_FOLDER_ID", ""), journal, report,
+        poll_interval=poll, max_wait=max_wait, save_progress=lambda: write_report(report_path, report),
+    )
+
+
+def verify_positions(path, log_dir, *, run_id=None, project_id=None, source_kind="browser"):
     from dashboard.runner import execute_run
     from dashboard.search import domain_hint, site_host
     from dashboard.storage import connect, run_lock, start_run
@@ -155,7 +174,10 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
             attempts=captcha["attempts"], manual_timeout=captcha["timeout"], poll=captcha["poll"],
             report_path=log_dir / "report.json",
         )
-        source = RankParser(journal, report, profile=profile, handler=handler)
+        if source_kind == "api":
+            source = api_source(journal, report, log_dir / "report.json")
+        else:
+            source = RankParser(journal, report, profile=profile, handler=handler)
         with connect(path) as db:
             if project_id is not None:
                 db.execute("BEGIN IMMEDIATE")
@@ -167,12 +189,21 @@ def verify_positions(path, log_dir, *, run_id=None, project_id=None):
                 ).fetchall()
                 if not words:
                     raise ValueError("В проекте нет поисковых фраз.")
-                run_id = start_run(db, project, words, "Парсер выдачи", domain_hint(project["url"]))
+                label = API_SOURCE_LABEL if source_kind == "api" else "Парсер выдачи"
+                run_id = start_run(db, project, words, label, domain_hint(project["url"]))
             run = db.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
             if run is None or run["state"] != "running":
                 raise ValueError("Активная проверка не найдена.")
-        report.update(run_id=run_id, target_domain=site_host(run["project_url"]), status="RUNNING")
+            phrases = [row["phrase"] for row in db.execute(
+                "SELECT phrase FROM measurements WHERE run_id = ? ORDER BY ordinal", (run_id,),
+            )]
+        report.update(
+            run_id=run_id, target_domain=site_host(run["project_url"]), status="RUNNING", source=source_kind,
+        )
         try:
+            if source_kind == "api":
+                # Submit every phrase first: deferred answers are then prepared in parallel.
+                source.prepare(phrases, run["region"])
             state = execute_run(path, run_id, source, report=report)
             if report["status"] != "TIMEOUT":
                 report["status"] = "OK" if state == "complete" else "ERROR"
@@ -196,6 +227,10 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--run-id", type=int, help="Выполнить проверку позиций, созданную панелью")
     mode.add_argument("--project-id", type=int, help="Создать и выполнить проверку позиций проекта из SQLite")
+    parser.add_argument(
+        "--source", choices=("browser", "api"), default="browser",
+        help="Источник выдачи для проверки позиций: Chromium или отложенные запросы Yandex Search API",
+    )
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
     if not args.headless and Path("/.dockerenv").exists():
@@ -211,9 +246,11 @@ def main():
         if args.debug:
             logging.getLogger("modules").setLevel(logging.DEBUG)
         if args.run_id is not None or args.project_id is not None:
-            if args.headless or os.environ.get("DISPLAY") != ":1":
+            if args.source == "browser" and (args.headless or os.environ.get("DISPLAY") != ":1"):
                 parser.error("Для проверки позиций требуется видимый Chromium на DISPLAY=:1.")
-            return verify_positions(args.db, log_dir, run_id=args.run_id, project_id=args.project_id)
+            return verify_positions(
+                args.db, log_dir, run_id=args.run_id, project_id=args.project_id, source_kind=args.source,
+            )
         config = read_config(args.config)
         return verify(config, log_dir, headless=args.headless)
     except Timeout:

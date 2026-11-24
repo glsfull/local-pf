@@ -37,6 +37,8 @@ def execute_agent(path, run_id, options):
         command.extend(["--db", db_path, "--log-dir", log_dir, "--run-id", str(run_id)])
         if options.debug_log:
             command.append("--debug")
+        if getattr(options, "search_api", False):
+            command.extend(["--source", "api"])
         subprocess.run(command, env=env, check=True)
         error = "Агент завершился без записи результатов. Проверьте общий путь к SQLite."
     except subprocess.CalledProcessError as exc:
