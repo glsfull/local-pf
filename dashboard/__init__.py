@@ -6,12 +6,10 @@ import json
 import logging
 import os
 from pathlib import Path
-import re
 import secrets
 import sqlite3
 from threading import Thread
 from time import monotonic
-from urllib.parse import urlsplit
 
 from flask import Flask, Response, abort, jsonify, redirect, render_template, request, session, url_for
 
@@ -23,6 +21,7 @@ from .forms import (
     brand_list, optional_number, position_region, read_project, read_schedule_settings, read_settings,
     read_visits, region_label, validate_project, validate_url,
 )
+from .connection import POSITION_SOURCES, read_connection, save_connection
 from .history import TIER_LABELS, moscow_date, rank_tier, read_history, visibility
 from .runner import execute_run
 from .search import domain_hint, site_host
@@ -46,10 +45,8 @@ PROJECT_TABS = (
     ("schedule", "Расписание"), ("expenses", "Расходы"), ("settings", "Настройки"),
 )
 EXPORTS = ("keywords", "clusters", "positions", "visits")
-POSITION_SOURCES = {"api": "Yandex Search API (отложенные запросы)", "browser": "Браузерный парсер выдачи"}
 DEFAULT_NOVNC_URL = "http://localhost:56565/"
 AGENT_EVENTS_SHOWN = 15
-FOLDER_ID = re.compile(r"[a-z0-9]{1,50}")
 logger = logging.getLogger(__name__)
 
 
@@ -83,18 +80,6 @@ def csv_response(name, header, rows):
         "﻿" + buffer.getvalue(), mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
     )
-
-
-def local_url(value):
-    """http(s) URL with a host, for example http://localhost:56565/ — the noVNC address of the agent."""
-    if len(value) > 2048 or re.search(r"[\s\x00-\x1f\x7f\\]", value):
-        return False
-    try:
-        parts = urlsplit(value)
-        parts.port
-    except ValueError:
-        return False
-    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 def mask_secret(value):
@@ -689,18 +674,7 @@ def create_app(
                     raise ValueError("Имя пользователя — до 50 символов.")
                 if telegram and (not telegram.startswith("https://") or not validate_url(telegram)):
                     raise ValueError("Ссылка на Телеграм-группу должна начинаться с https://.")
-                api_key = request.form.get("yandex_api_key", "").strip()
-                folder_id = request.form.get("yandex_folder_id", "").strip()
-                wanted_source = request.form.get("position_source", "api")
-                novnc = request.form.get("novnc_url", "").strip()
-                if api_key and (len(api_key) > 200 or any(char.isspace() for char in api_key)):
-                    raise ValueError("YANDEX_API_KEY: ключ без пробелов, до 200 символов.")
-                if folder_id and not FOLDER_ID.fullmatch(folder_id):
-                    raise ValueError("YANDEX_FOLDER_ID: латинские буквы и цифры, до 50 символов.")
-                if wanted_source not in POSITION_SOURCES:
-                    raise ValueError("Выберите источник позиций.")
-                if novnc and not local_url(novnc):
-                    raise ValueError("Адрес noVNC должен начинаться с http:// или https://.")
+                connection = read_connection(request.form)
             except ValueError as exc:
                 error = str(exc)
             else:
@@ -711,11 +685,7 @@ def create_app(
                     # An empty key field keeps the saved key: the key is never sent back to the browser.
                     if request.form.get("clear_api_key"):
                         save_panel_setting(db, "yandex_api_key", "")
-                    elif api_key:
-                        save_panel_setting(db, "yandex_api_key", api_key)
-                    save_panel_setting(db, "yandex_folder_id", folder_id)
-                    save_panel_setting(db, "position_source", wanted_source)
-                    save_panel_setting(db, "novnc_url", novnc)
+                    save_connection(db, connection)
                 return redirect(url_for("settings"), code=303)
         with connect(path) as db:
             values = {
