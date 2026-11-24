@@ -128,6 +128,7 @@
       <h2>Детали проверки</h2>
       <p class="muted">{{ run.source }} · {{ run.started_at|display_date }}{% if run.region %} · Регион {{ run.region }}{% endif %} · <span class="state {{ run.state }}">{{ states[run.state] }}</span></p>
       {% if run.project_url != project.url %}<p class="muted">{{ run.project_url }}</p>{% endif %}
+      {% if api_usage %}<p class="muted" data-api-usage>Yandex Search API: запросов {{ api_usage[0] }} · {{ api_usage[1]|metric(' ₽') }}</p>{% endif %}
       {% if has_report %}<p><a href="{{ url_for('run_logs', project_id=project.id, run_id=run.id) }}">Журнал проверки</a></p>{% endif %}
     </div>
     {% if runs|length > 1 %}

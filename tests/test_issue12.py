@@ -193,6 +193,8 @@ class ApiPanelTest(DashboardCase):
         self.assertEqual(report["api_requests"], 7)
         self.assertGreater(report["api_cost_rub"], 0)
         self.assertNotIn("AQVNsecretvalue1234", json.dumps(report))
+        page = self.client.get(project + "/positions").get_data(as_text=True)
+        self.assertIn("Yandex Search API: запросов 7 · 0,", page)
 
     def test_missing_credentials_fall_back_to_browser_parser(self):
         project = self.create_project()
@@ -522,6 +524,20 @@ class EntrypointTest(unittest.TestCase):
         self.assertIn("не найден", ensure_container("dp-agent", docker("")[0]))
         self.assertIn("no such image", ensure_container("dp-agent", docker("false", start=1)[0]))
         self.assertIn("Docker недоступен", ensure_container("dp-agent", docker("", error=FileNotFoundError("docker"))[0]))
+
+    def test_chromium_flags_for_container(self):
+        from modules import browser
+
+        for in_docker, expected in ((True, True), (False, False)):
+            with (
+                patch.dict(os.environ, {"CHROME_PATH": "/usr/bin/chromium"}),
+                patch("modules.browser.ChromiumPage", side_effect=lambda options: options),
+                patch("modules.browser.os.geteuid", return_value=1000, create=True),
+                patch("modules.browser.os.path.exists", return_value=in_docker),
+            ):
+                options = browser.open_browser(5)
+            self.assertIn("--disable-dev-shm-usage", options.arguments)
+            self.assertEqual("--no-sandbox" in options.arguments, expected)
 
     def test_config_search_depth(self):
         config = read_config(ROOT / "config.yaml")

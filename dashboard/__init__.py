@@ -437,13 +437,17 @@ def create_app(
                 measurements = db.execute(
                     "SELECT * FROM measurements WHERE run_id = ? ORDER BY ordinal", (run["id"],)
                 ).fetchall() if run else []
-                has_report = run and db.execute(
-                    "SELECT 1 FROM run_reports WHERE run_id = ?", (run["id"],),
-                ).fetchone() is not None
+                report_row = run and db.execute(
+                    "SELECT report_json FROM run_reports WHERE run_id = ?", (run["id"],),
+                ).fetchone()
+                has_report = bool(report_row)
+                report = json.loads(report_row["report_json"]) if report_row else {}
+                # Paid Search API requests of the check: the count and the cost at the day or night price.
+                api_usage = (report["api_requests"], report.get("api_cost_rub", 0)) if "api_requests" in report else None
                 context.update(
                     days=days, history=lines, pagination=pagination, latest=latest, tiers=TIER_LABELS,
                     chart=visibility(days, history, hinted_chart), hinted_chart=hinted_chart,
-                    measurements=measurements, has_report=has_report, period=period, since=since, until=until,
+                    measurements=measurements, has_report=has_report, api_usage=api_usage, period=period, since=since, until=until,
                 )
             elif view == "visits":
                 _, _, latest = read_history(db, project_id, limit=1)
